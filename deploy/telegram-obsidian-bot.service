@@ -13,6 +13,11 @@ WorkingDirectory=/opt/telegram-obsidian-bot
 # .env читает сам pydantic-settings из WorkingDirectory.
 # EnvironmentFile здесь не нужен и даже вреден: systemd не понимает
 # кавычки и inline-комментарии так, как это делает python-dotenv.
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+# glibc создаёт арену на каждый поток; для маленького бота это лишние десятки МБ
+Environment=MALLOC_ARENA_MAX=2
+
 ExecStart=/opt/telegram-obsidian-bot/.venv/bin/python -u bot.py
 
 Restart=always
