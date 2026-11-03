@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     timezone: str = "Asia/Yekaterinburg"
     log_level: str = "INFO"
     max_audio_mb: int = Field(default=20, ge=1, le=100)
+    filename_transliterate: bool = True
 
     # ── Валидаторы ────────────────────────────────────────────
 

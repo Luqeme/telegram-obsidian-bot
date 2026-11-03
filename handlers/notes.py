@@ -135,7 +135,11 @@ async def _process(
 
     created = datetime.now(services.settings.tz)
     content = build_markdown(draft, original, source, created)  # type: ignore[arg-type]
-    filename = make_filename(draft.title, created)
+    filename = make_filename(
+        draft.title,
+        created,
+        transliterate=services.settings.filename_transliterate,
+    )
     commit_message = f"Add note from Telegram: {draft.title}"
 
     try:

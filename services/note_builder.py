@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, field_validator
 Category = Literal["Идея", "Задача", "Мысль", "Контент", "Встреча"]
 NoteSource = Literal["voice", "text"]
 
-MAX_SLUG_LEN = 30
+MAX_SLUG_LEN = 40
 MAX_TAGS = 4
 
 _ORIGIN_ICON: dict[str, str] = {"voice": "🎙", "text": "📝"}
@@ -77,13 +77,21 @@ class NoteDraft(BaseModel):
 # ── Slug ─────────────────────────────────────────────────────
 
 
-def slugify(title: str, max_len: int = MAX_SLUG_LEN) -> str:
-    """Транслитерирует заголовок в безопасное имя файла."""
+def slugify(
+    title: str, max_len: int = MAX_SLUG_LEN, *, transliterate: bool = True
+) -> str:
+    """Делает безопасное имя файла.
+
+    transliterate=True — латиница («oplatit-internet»), False — кириллица
+    («оплатить-интернет»). Оба варианта валидны для GitHub, Obsidian и Android.
+    """
     chars: list[str] = []
     for char in title.strip().lower():
         if char in _TRANSLIT:
-            chars.append(_TRANSLIT[char])
+            chars.append(_TRANSLIT[char] if transliterate else char)
         elif char.isascii() and char.isalnum():
+            chars.append(char)
+        elif not transliterate and char.isalpha():
             chars.append(char)
         else:
             chars.append("-")
@@ -97,9 +105,16 @@ def slugify(title: str, max_len: int = MAX_SLUG_LEN) -> str:
     return slug or "note"
 
 
-def make_filename(title: str, moment: datetime, max_len: int = MAX_SLUG_LEN) -> str:
+def make_filename(
+    title: str,
+    moment: datetime,
+    max_len: int = MAX_SLUG_LEN,
+    *,
+    transliterate: bool = True,
+) -> str:
     """YYYY-MM-DD_HH-mm-ss_{slug}.md, время — в таймзоне пользователя."""
-    return f"{moment:%Y-%m-%d_%H-%M-%S}_{slugify(title, max_len)}.md"
+    slug = slugify(title, max_len, transliterate=transliterate)
+    return f"{moment:%Y-%m-%d_%H-%M-%S}_{slug}.md"
 
 
 # ── Теги ─────────────────────────────────────────────────────
