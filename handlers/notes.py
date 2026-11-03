@@ -143,7 +143,7 @@ async def _process(
     commit_message = f"Add note from Telegram: {draft.title}"
 
     try:
-        path, url = await services.github.save_note(filename, content, commit_message)
+        path, _ = await services.github.save_note(filename, content, commit_message)
     except GitHubError as exc:
         logger.error("save_note: %s", exc)
         await message.answer(
@@ -161,20 +161,17 @@ async def _process(
         path,
     )
     await message.answer(
-        _render_card(path, url, draft),
+        _render_card(path, draft),
         parse_mode="HTML",
-        disable_web_page_preview=True,
     )
 
 
-def _render_card(path: str, url: str, draft: NoteDraft) -> str:
+def _render_card(path: str, draft: NoteDraft) -> str:
     lines = [
         "✅ <b>Заметка сохранена в Obsidian</b>",
         "",
         f"📁 <code>{html.escape(path)}</code>",
     ]
-    if url:
-        lines.append(f'🔗 <a href="{html.escape(url, quote=True)}">Открыть в GitHub</a>')
 
     tags = normalize_tags(draft.tags)
     if tags:

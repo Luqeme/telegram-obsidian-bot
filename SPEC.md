@@ -428,7 +428,6 @@ X-GitHub-Api-Version: 2022-11-28
 ✅ <b>Заметка сохранена в Obsidian</b>
 
 📁 <code>00_Inbox/2026-11-03_14-30-05_refaktoring-avtorizacii.md</code>
-🔗 <a href="{html_url}">Открыть в GitHub</a>
 
 🏷 <code>#backend</code> <code>#пет-проект</code>
 

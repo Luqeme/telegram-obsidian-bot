@@ -36,3 +36,20 @@ def test_too_long_is_rejected() -> None:
     )
     assert reason is not None
     assert "мин" in reason
+
+
+def test_card_has_no_github_link() -> None:
+    from services.note_builder import NoteDraft
+
+    from handlers.notes import _render_card
+
+    draft = NoteDraft(
+        is_meaningful=True,
+        title="Тест",
+        category="Мысль",
+        tags=["тест"],
+        summary="Проверка карточки.",
+    )
+    card = _render_card("00_Inbox/2026-11-04_00-00-00_test.md", draft)
+    assert "github.com" not in card
+    assert "00_Inbox/2026-11-04_00-00-00_test.md" in card
