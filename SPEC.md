@@ -591,7 +591,7 @@ Docker в v1 не требуется: целевой деплой — systemd н
 
 ## 20. Порядок работ (зафиксировано 2026-11-03)
 
-**Статус:** этапы 1 и 2 готовы и проверены на живом боте (2026-11-04). Дальше — этап 3.
+**Статус:** этапы 1–3 готовы. Задеплоено на VPS `lq.telega` (2026-11-04), сервис `telegram-obsidian-bot`.
 
 ### Этап 1 — сквозной сценарий «текст → файл в GitHub»
 Порядок: `config.py` → `services/note_builder.py` + `tests/` → `services/github_service.py` → `services/groq_service.structure_note()` → `handlers/notes.py` (только текст) → `bot.py` + `middlewares/auth.py`.
