@@ -212,3 +212,48 @@ journalctl -u telegram-obsidian-bot -n 100 --no-pager
 - `TelegramUnauthorizedError` — токен отозван, нужен новый у `@BotFather`.
 - Бот работает, но не отвечает — проверь `ALLOWED_TELEGRAM_USERS`.
 
+---
+
+## Синхронизация с телефоном (Android)
+
+Бот коммитит заметки в GitHub. Чтобы они появлялись на телефоне, нужно связать хранилище с репозиторием и там.
+
+### 1. Токен
+
+GitHub → Settings → Developer settings → Personal access tokens → **Fine-grained tokens** → Generate new token:
+
+| Поле | Значение |
+|---|---|
+| Repository access | Only select repositories → `obsidian-vault` |
+| Permissions → Contents | **Read and write** |
+| Expiration | 90 дней (по умолчанию) |
+
+### 2. Плагин
+
+Obsidian на Android → Settings → Community plugins → Browse → **Git** (Vinzent03) → Install → Enable.
+
+### 3. Клонирование
+
+Командная палитра → `Git: Clone an existing remote repo`:
+
+| Поле | Значение |
+|---|---|
+| Repository URL | `https://github.com/Luqeme/obsidian-vault.git` |
+| Username | `Luqeme` |
+| Password | `github_pat_...` |
+
+### 4. Настройки
+
+| Параметр | Значение |
+|---|---|
+| Auto pull interval | 5 минут |
+| Pull updates on startup | вкл |
+| Author name / email | `Luqeme` / `26500323+Luqeme@users.noreply.github.com` |
+
+### Ограничения
+
+- **Токен истекает.** Через 90 дней синхронизация молча перестанет работать — это самая частая причина «заметки не приходят». Обновляй токен заранее.
+- **Конфликты.** Если править один файл на двух устройствах одновременно, git создаст конфликт. Практически не случается: бот только создаёт новые файлы.
+- **Фоновая синхронизация на Android ограничена** системой. Надёжнее всего синхронизировать при открытии Obsidian (Pull on startup).
+
+
