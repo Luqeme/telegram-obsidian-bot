@@ -1,0 +1,39 @@
+[Unit]
+Description=Telegram Obsidian Bot
+Documentation=https://github.com/Luqeme/telegram-obsidian-bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=obsidianbot
+Group=obsidianbot
+WorkingDirectory=/opt/telegram-obsidian-bot
+
+# .env читает сам pydantic-settings из WorkingDirectory.
+# EnvironmentFile здесь не нужен и даже вреден: systemd не понимает
+# кавычки и inline-комментарии так, как это делает python-dotenv.
+ExecStart=/opt/telegram-obsidian-bot/.venv/bin/python -u bot.py
+
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+KillSignal=SIGINT
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=obsidian-bot
+
+# Минимальные права: сервису нечего делать вне своей папки
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/telegram-obsidian-bot
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

@@ -555,7 +555,7 @@ pytest-asyncio>=0.24
 
 **Первый запуск:** отправить боту `/id` (добавить в `base.py`) — так проще всего узнать свой `user_id` для whitelist.
 
-Docker в v1 не требуется. При желании — отдельным этапом: `python:3.12-slim`, без ffmpeg.
+Docker в v1 не требуется: целевой деплой — systemd на VPS, юнит лежит в `deploy/telegram-obsidian-bot.service`, пошаговая инструкция — в README.
 
 ---
 

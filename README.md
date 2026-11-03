@@ -135,3 +135,80 @@ pytest
 ## Стек
 
 Python 3.10+ · aiogram 3 · httpx · pydantic-settings · Groq Cloud · GitHub REST API
+
+---
+
+## Деплой на VPS (systemd)
+
+Проверено на Ubuntu 22.04 / 24.04. Нужен любой сервер с systemd.
+
+### 1. Подготовка системы
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-venv git
+sudo useradd --create-home --shell /bin/bash obsidianbot
+```
+
+### 2. Код и зависимости
+
+```bash
+sudo git clone https://github.com/Luqeme/telegram-obsidian-bot.git /opt/telegram-obsidian-bot
+sudo chown -R obsidianbot:obsidianbot /opt/telegram-obsidian-bot
+
+sudo -u obsidianbot python3 -m venv /opt/telegram-obsidian-bot/.venv
+sudo -u obsidianbot /opt/telegram-obsidian-bot/.venv/bin/pip install -r /opt/telegram-obsidian-bot/requirements.txt
+```
+
+### 3. Конфигурация
+
+```bash
+sudo -u obsidianbot nano /opt/telegram-obsidian-bot/.env
+sudo chmod 600 /opt/telegram-obsidian-bot/.env
+```
+
+### 4. Служба
+
+```bash
+sudo cp /opt/telegram-obsidian-bot/deploy/telegram-obsidian-bot.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now telegram-obsidian-bot
+```
+
+### 5. Проверка
+
+```bash
+systemctl status telegram-obsidian-bot
+journalctl -u telegram-obsidian-bot -f
+```
+
+В логах должно появиться:
+
+```
+INFO | bot | Запуск: llm=openai/gpt-oss-120b, stt=whisper-large-v3, repo=...
+INFO | aiogram.dispatcher | Start polling
+```
+
+### Обслуживание
+
+```bash
+# после изменения .env
+sudo systemctl restart telegram-obsidian-bot
+
+# обновление кода
+cd /opt/telegram-obsidian-bot
+sudo -u obsidianbot git pull
+sudo -u obsidianbot .venv/bin/pip install -r requirements.txt
+sudo systemctl restart telegram-obsidian-bot
+
+# последние 100 строк логов
+journalctl -u telegram-obsidian-bot -n 100 --no-pager
+```
+
+### Если что-то не так
+
+- `status=203/EXEC` — неверный путь в `ExecStart` или venv не создан.
+- `status=1` сразу после старта — смотри `journalctl`: скорее всего незаполненный `.env`, бот печатает, какого поля не хватает.
+- `TelegramUnauthorizedError` — токен отозван, нужен новый у `@BotFather`.
+- Бот работает, но не отвечает — проверь `ALLOWED_TELEGRAM_USERS`.
+
