@@ -1,26 +1,13 @@
 ```meta-bind-button
-id: git-pull
-label: Получить
-icon: download
-style: default
-hidden: true
-actions:
-  - type: command
-    command: obsidian-git:pull
-```
-
-```meta-bind-button
-id: git-sync
-label: Отправить
-icon: upload
+label: Синхронизировать
+icon: refresh-cw
 style: primary
-hidden: true
 actions:
   - type: command
     command: obsidian-git:commit-and-sync
+  - type: command
+    command: obsidian-git:pull
 ```
-
-`BUTTON[git-pull, git-sync]`
 
 # 🧠 База знаний
 
