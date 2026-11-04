@@ -133,6 +133,94 @@ if (stale.length) {
 
 ---
 
+## 💰 Деньги
+
+```dataviewjs
+const container = this.container
+
+;(async () => {
+  let rows = []
+  try {
+    rows = (await dv.io.csv("30_Money/transactions.csv")) ?? []
+  } catch (error) {
+    rows = []
+  }
+
+  if (!rows.length) {
+    dv.paragraph("Пока нет записей.")
+    return
+  }
+
+  const days = 14
+  const labels = []
+  const income = []
+  const expense = []
+  const index = {}
+  const today = dv.date("today")
+
+  for (let i = days - 1; i >= 0; i--) {
+    const day = today.minus(dv.duration(`${i} days`))
+    const key = day.toFormat("yyyy-MM-dd")
+    index[key] = labels.length
+    labels.push(day.toFormat("dd.MM"))
+    income.push(0)
+    expense.push(0)
+  }
+
+  let totalIn = 0
+  let totalOut = 0
+
+  for (const row of rows) {
+    const amount = Number(row.amount) || 0
+    if (row.kind === "income") totalIn += amount
+    if (row.kind === "expense") totalOut += amount
+
+    const position = index[row.date]
+    if (position === undefined) continue
+    if (row.kind === "income") income[position] += amount
+    if (row.kind === "expense") expense[position] += amount
+  }
+
+  dv.paragraph(
+    `Доход **${totalIn.toLocaleString("ru-RU")} ₽** · Расход **${totalOut.toLocaleString(
+      "ru-RU"
+    )} ₽** · Итого **${(totalIn - totalOut).toLocaleString("ru-RU")} ₽**`
+  )
+
+  if (typeof window.renderChart !== "function") return
+
+  window.renderChart(
+    {
+      type: "bar",
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: "Доход",
+            data: income,
+            backgroundColor: "#4ec9b0",
+            borderRadius: 6
+          },
+          {
+            label: "Расход",
+            data: expense,
+            backgroundColor: "#e06c75",
+            borderRadius: 6
+          }
+        ]
+      },
+      options: {
+        plugins: { legend: { position: "bottom" } },
+        scales: { y: { beginAtZero: true } }
+      }
+    },
+    container
+  )
+})()
+```
+
+---
+
 ## 📄 Последние
 
 ```dataview
