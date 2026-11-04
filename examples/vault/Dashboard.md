@@ -1,5 +1,23 @@
 # 🧠 База знаний
 
+```meta-bind-button
+label: Получить
+icon: download
+style: default
+actions:
+  - type: command
+    command: obsidian-git:pull
+```
+
+```meta-bind-button
+label: Отправить
+icon: upload
+style: primary
+actions:
+  - type: command
+    command: obsidian-git:commit-and-sync
+```
+
 ```dataviewjs
 const pages = dv.pages()
 const notes = pages.where((p) => p.created).length
