@@ -29,7 +29,9 @@ MIN_TEXT_LEN = 15
 MIN_TRANSCRIPT_LEN = 10
 MAX_AUDIO_SECONDS = 20 * 60
 CARD_LIMIT = 4000
-SUMMARY_LIMIT = 1200
+SUMMARY_LIMIT = 600
+TASK_LIMIT = 200
+MAX_CARD_TASKS = 15
 
 
 def check_voice_limits(size: int, duration: int, limit_mb: int) -> str | None:
@@ -183,17 +185,28 @@ def _render_card(path: str, draft: NoteDraft) -> str:
         lines.extend(["", "💡 <b>Суть</b>", html.escape(_shorten(draft.summary))])
 
     if draft.tasks:
-        lines.extend(["", f"📋 Задач: {len(draft.tasks)}"])
+        lines.extend(["", "📋 <b>Задачи</b>"])
+        for task in draft.tasks[:MAX_CARD_TASKS]:
+            lines.append(f"☐ {html.escape(_shorten(task, TASK_LIMIT))}")
+        hidden = len(draft.tasks) - MAX_CARD_TASKS
+        if hidden > 0:
+            lines.append(f"…и ещё {hidden}")
 
-    return "\n".join(lines)[:CARD_LIMIT]
+    # Режем по границе строки: каждая строка уже ограничена по длине,
+    # поэтому HTML-теги внутри неё не разрываются.
+    text = "\n".join(lines)
+    if len(text) > CARD_LIMIT:
+        text = text[:CARD_LIMIT].rsplit("\n", 1)[0] + "\n…"
+    return text
 
 
-def _shorten(text: str) -> str:
-    if len(text) <= SUMMARY_LIMIT:
+def _shorten(text: str, limit: int = SUMMARY_LIMIT) -> str:
+    text = " ".join(text.split())
+    if len(text) <= limit:
         return text
-    cut = text[:SUMMARY_LIMIT]
+    cut = text[:limit]
     for separator in (". ", "! ", "? "):
         index = cut.rfind(separator)
-        if index > SUMMARY_LIMIT // 2:
+        if index > limit // 2:
             return cut[: index + 1].strip()
     return cut.rstrip() + "…"
