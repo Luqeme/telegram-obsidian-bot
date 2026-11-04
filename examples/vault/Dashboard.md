@@ -1,18 +1,24 @@
 # 🧠 База знаний
 
+`BUTTON[git-pull, git-sync]`
+
 ```meta-bind-button
+id: git-pull
 label: Получить
 icon: download
 style: default
+hidden: true
 actions:
   - type: command
     command: obsidian-git:pull
 ```
 
 ```meta-bind-button
+id: git-sync
 label: Отправить
 icon: upload
 style: primary
+hidden: true
 actions:
   - type: command
     command: obsidian-git:commit-and-sync
