@@ -160,12 +160,42 @@ const container = this.container
     return
   }
 
+  const toDay = (value) => {
+    if (value == null) return null
+    if (typeof value.toFormat === "function") return value.startOf("day")
+    if (value instanceof Date) return dv.date(value.toISOString().slice(0, 10))
+    return dv.date(String(value).trim().slice(0, 10))
+  }
+
+  const items = Array.from(rows).map((row) => ({
+    date: toDay(row.date),
+    kind: String(row.kind ?? "").trim(),
+    amount: Number(row.amount) || 0,
+    category: String(row.category ?? "").trim(),
+    note: String(row.note ?? "").trim()
+  }))
+
+  items.sort((a, b) => (b.date?.toMillis?.() ?? 0) - (a.date?.toMillis?.() ?? 0))
+
+  let totalIn = 0
+  let totalOut = 0
+  for (const item of items) {
+    if (item.kind === "income") totalIn += item.amount
+    if (item.kind === "expense") totalOut += item.amount
+  }
+
+  dv.paragraph(
+    `Доход **${totalIn.toLocaleString("ru-RU")} ₽** · Расход **${totalOut.toLocaleString(
+      "ru-RU"
+    )} ₽** · Итого **${(totalIn - totalOut).toLocaleString("ru-RU")} ₽**`
+  )
+
   const days = 14
   const labels = []
   const income = []
   const expense = []
   const index = {}
-  const today = dv.date("today")
+  const today = dv.date("today").startOf("day")
 
   for (let i = days - 1; i >= 0; i--) {
     const day = today.minus(dv.duration(`${i} days`))
@@ -176,54 +206,53 @@ const container = this.container
     expense.push(0)
   }
 
-  let totalIn = 0
-  let totalOut = 0
-
-  for (const row of rows) {
-    const amount = Number(row.amount) || 0
-    if (row.kind === "income") totalIn += amount
-    if (row.kind === "expense") totalOut += amount
-
-    const position = index[row.date]
+  for (const item of items) {
+    if (!item.date) continue
+    const position = index[item.date.toFormat("yyyy-MM-dd")]
     if (position === undefined) continue
-    if (row.kind === "income") income[position] += amount
-    if (row.kind === "expense") expense[position] += amount
+    if (item.kind === "income") income[position] += item.amount
+    if (item.kind === "expense") expense[position] += item.amount
   }
 
-  dv.paragraph(
-    `Доход **${totalIn.toLocaleString("ru-RU")} ₽** · Расход **${totalOut.toLocaleString(
-      "ru-RU"
-    )} ₽** · Итого **${(totalIn - totalOut).toLocaleString("ru-RU")} ₽**`
-  )
-
-  if (typeof window.renderChart !== "function") return
-
-  window.renderChart(
-    {
-      type: "bar",
-      data: {
-        labels: labels,
-        datasets: [
-          {
-            label: "Доход",
-            data: income,
-            backgroundColor: "#4ec9b0",
-            borderRadius: 6
-          },
-          {
-            label: "Расход",
-            data: expense,
-            backgroundColor: "#e06c75",
-            borderRadius: 6
-          }
-        ]
+  if (typeof window.renderChart === "function") {
+    window.renderChart(
+      {
+        type: "bar",
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: "Доход",
+              data: income,
+              backgroundColor: "#4ec9b0",
+              borderRadius: 6
+            },
+            {
+              label: "Расход",
+              data: expense,
+              backgroundColor: "#e06c75",
+              borderRadius: 6
+            }
+          ]
+        },
+        options: {
+          plugins: { legend: { position: "bottom" } },
+          scales: { y: { beginAtZero: true } }
+        }
       },
-      options: {
-        plugins: { legend: { position: "bottom" } },
-        scales: { y: { beginAtZero: true } }
-      }
-    },
-    container
+      container
+    )
+  }
+
+  dv.table(
+    ["Дата", "Тип", "Сумма", "Категория", "Заметка"],
+    items.slice(0, 12).map((item) => [
+      item.date ? item.date.toFormat("dd.MM.yyyy") : "",
+      item.kind === "income" ? "Доход" : "Расход",
+      `${item.kind === "income" ? "+" : "−"}${item.amount.toLocaleString("ru-RU")} ₽`,
+      item.category,
+      item.note
+    ])
   )
 })()
 ```
