@@ -51,6 +51,10 @@ pip install -r requirements.txt
 | `OBSIDIAN_INBOX_DIR` | нет | по умолчанию `00_Inbox` |
 | `TIMEZONE` | нет | по умолчанию `Asia/Yekaterinburg` |
 | `MAX_AUDIO_MB` | нет | по умолчанию `20` |
+| `FILENAME_TRANSLITERATE` | нет | `true` — латиница в именах файлов, `false` — кириллица |
+| `GROQ_STT_MODEL` | нет | по умолчанию `whisper-large-v3` |
+| `GROQ_LLM_MODEL` | нет | по умолчанию `openai/gpt-oss-120b` |
+| `LOG_LEVEL` | нет | по умолчанию `INFO`, допустимо `DEBUG`…`CRITICAL` |
 
 Что важно знать:
 
