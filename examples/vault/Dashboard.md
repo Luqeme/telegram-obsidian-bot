@@ -190,18 +190,17 @@ const container = this.container
     )} ₽** · Итого **${(totalIn - totalOut).toLocaleString("ru-RU")} ₽**`
   )
 
-  const days = 14
   const labels = []
   const income = []
   const expense = []
   const index = {}
   const today = dv.date("today").startOf("day")
+  const monthStart = today.startOf("month")
 
-  for (let i = days - 1; i >= 0; i--) {
-    const day = today.minus(dv.duration(`${i} days`))
+  for (let day = monthStart; day <= today; day = day.plus({ days: 1 })) {
     const key = day.toFormat("yyyy-MM-dd")
     index[key] = labels.length
-    labels.push(day.toFormat("dd.MM"))
+    labels.push(day.toFormat("dd"))
     income.push(0)
     expense.push(0)
   }
