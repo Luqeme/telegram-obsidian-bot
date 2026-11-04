@@ -8,9 +8,9 @@ import io
 import logging
 from datetime import datetime
 
-from aiogram import Router
-from aiogram.filters import Command, CommandStart
-from aiogram.types import Message
+from aiogram import F, Router
+from aiogram.filters import Command, CommandStart, Filter
+from aiogram.types import ForceReply, Message
 
 from services import GitHubError, GroqError, Services
 
@@ -22,6 +22,21 @@ SEARCH_LIMIT = 5
 SNIPPET_PAD = 60
 ASK_CONTEXT_NOTES = 5
 ASK_CONTEXT_CHARS = 700
+
+# user_id -> (что ждём, id сообщения-приглашения)
+PENDING: dict[int, tuple[str, int]] = {}
+
+
+class IsPendingReply(Filter):
+    """Пользователь отвечает на приглашение ввести запрос."""
+
+    async def __call__(self, message: Message) -> bool:
+        user = message.from_user
+        reply = message.reply_to_message
+        if user is None or reply is None:
+            return False
+        entry = PENDING.get(user.id)
+        return bool(entry and entry[1] == reply.message_id)
 
 
 @router.message(CommandStart())
@@ -79,9 +94,14 @@ async def cmd_id(message: Message) -> None:
 async def cmd_find(message: Message, services: Services) -> None:
     query = _argument(message)
     if len(query) < 2:
-        await message.answer("🔎 Что искать? Например: <code>/find JWT</code>", parse_mode="HTML")
+        await _ask_for_input(
+            message, "find", "🔎 Что искать? Напиши ответом на это сообщение."
+        )
         return
+    await _run_find(message, services, query)
 
+
+async def _run_find(message: Message, services: Services, query: str) -> None:
     try:
         found = await services.index.search(query, limit=SEARCH_LIMIT)
     except GitHubError as exc:
@@ -115,12 +135,14 @@ async def cmd_find(message: Message, services: Services) -> None:
 async def cmd_ask(message: Message, services: Services) -> None:
     question = _argument(message)
     if len(question) < 3:
-        await message.answer(
-            "💬 О чём спросить? Например: <code>/ask что я писал про дашборд</code>",
-            parse_mode="HTML",
+        await _ask_for_input(
+            message, "ask", "💬 Что спросить у базы? Напиши ответом на это сообщение."
         )
         return
+    await _run_ask(message, services, question)
 
+
+async def _run_ask(message: Message, services: Services, question: str) -> None:
     try:
         found = await services.index.search(question, limit=ASK_CONTEXT_NOTES)
     except GitHubError as exc:
@@ -151,6 +173,23 @@ async def cmd_ask(message: Message, services: Services) -> None:
         parse_mode="HTML",
         disable_web_page_preview=True,
     )
+
+
+@router.message(IsPendingReply(), F.text)
+async def on_pending_reply(message: Message, services: Services) -> None:
+    user = message.from_user
+    if user is None:
+        return
+
+    kind, _ = PENDING.pop(user.id, ("", 0))
+    text = (message.text or "").strip()
+    if not text:
+        return
+
+    if kind == "find":
+        await _run_find(message, services, text)
+    elif kind == "ask":
+        await _run_ask(message, services, text)
 
 
 @router.message(Command("money"))
@@ -202,6 +241,12 @@ async def cmd_money(message: Message, services: Services) -> None:
 
 def _argument(message: Message) -> str:
     return (message.text or "").partition(" ")[2].strip()
+
+
+async def _ask_for_input(message: Message, kind: str, prompt: str) -> None:
+    sent = await message.answer(prompt, reply_markup=ForceReply(selective=True))
+    if message.from_user is not None:
+        PENDING[message.from_user.id] = (kind, sent.message_id)
 
 
 async def _read_money(services: Services) -> list[dict]:
