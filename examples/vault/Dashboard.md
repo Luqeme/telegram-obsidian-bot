@@ -59,41 +59,6 @@ if (tasks.length) {
 
 ```dataviewjs
 if (typeof window.renderChart === "function") {
-  const byDay = {}
-  for (const p of dv.pages()) {
-    const d = p.created
-    if (!d) continue
-    const key =
-      typeof d.toFormat === "function" ? d.toFormat("yyyy-MM-dd") : String(d).slice(0, 10)
-    byDay[key] = (byDay[key] ?? 0) + 1
-  }
-  const keys = Object.keys(byDay).sort().slice(-14)
-  window.renderChart(
-    {
-      type: "bar",
-      data: {
-        labels: keys.map((k) => k.slice(8) + "." + k.slice(5, 7)),
-        datasets: [
-          {
-            label: "Заметок",
-            data: keys.map((k) => byDay[k]),
-            backgroundColor: "#7c6cff",
-            borderRadius: 6
-          }
-        ]
-      },
-      options: {
-        plugins: { legend: { display: false } },
-        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
-      }
-    },
-    this.container
-  )
-}
-```
-
-```dataviewjs
-if (typeof window.renderChart === "function") {
   const counts = {}
   for (const p of dv.pages()) {
     if (!p.category) continue
