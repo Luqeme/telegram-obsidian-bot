@@ -29,11 +29,10 @@ dv.paragraph(
 TABLE WITHOUT ID
   link(file.path, default(title, file.name)) AS "Заметка",
   category AS "Категория",
-  tags AS "Теги",
-  created AS "Создано"
+  (date(today) - created).days AS "Дней"
 FROM ""
 WHERE contains(file.folder, "00_Inbox")
-SORT created DESC
+SORT created ASC
 ```
 
 ---
@@ -179,6 +178,77 @@ if (typeof window.renderChart === "function") {
     },
     this.container
   )
+}
+```
+
+---
+
+```dataviewjs
+const cutoff = dv.date("today").minus(dv.duration("14 days"))
+const hanging = []
+for (const p of dv.pages()) {
+  const c = p.created
+  if (!c) continue
+  const d = typeof c.toFormat === "function" ? c : dv.date(String(c))
+  if (!d || d > cutoff) continue
+  for (const t of p.file.tasks ?? []) {
+    if (!t.completed) hanging.push(t)
+  }
+}
+if (hanging.length) {
+  dv.header(4, "⏳ Висит больше двух недель")
+  dv.taskList(hanging, false)
+}
+```
+
+```dataviewjs
+const skip = ["Dashboard", "README"]
+const untagged = dv
+  .pages()
+  .where((p) => !skip.includes(p.file.name))
+  .where((p) => (p.file.tags ?? []).length === 0)
+if (untagged.length) {
+  dv.header(4, "🏷 Без тегов")
+  dv.list(untagged.map((p) => dv.fileLink(p.file.path, false, p.title ?? p.file.name)))
+}
+```
+
+```dataviewjs
+const cutoff = dv.date("today").minus(dv.duration("30 days"))
+const stale = dv.pages().where((p) => {
+  if (!String(p.file.folder).includes("10_Notes")) return false
+  const c = p.created
+  if (!c) return false
+  const d = typeof c.toFormat === "function" ? c : dv.date(String(c))
+  if (!d || d > cutoff) return false
+  return (p.file.tasks ?? []).length === 0 && (p.file.outlinks ?? []).length === 0
+})
+if (stale.length) {
+  dv.header(4, "🧊 Без продолжения")
+  dv.list(stale.map((p) => dv.fileLink(p.file.path, false, p.title ?? p.file.name)))
+}
+```
+
+```dataviewjs
+const pages = dv.pages().where((p) => (p.file.tags ?? []).length > 0)
+const rows = []
+for (let i = 0; i < pages.length; i++) {
+  for (let j = i + 1; j < pages.length; j++) {
+    const a = pages[i]
+    const b = pages[j]
+    const shared = (a.file.tags ?? []).filter((t) => (b.file.tags ?? []).includes(t))
+    if (shared.length >= 2) {
+      rows.push([
+        dv.fileLink(a.file.path, false, a.title ?? a.file.name),
+        dv.fileLink(b.file.path, false, b.title ?? b.file.name),
+        shared.join(", ")
+      ])
+    }
+  }
+}
+if (rows.length) {
+  dv.header(4, "🔗 Похожие заметки")
+  dv.table(["Заметка", "Похожая", "Общие теги"], rows.slice(0, 15))
 }
 ```
 
