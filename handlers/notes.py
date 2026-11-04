@@ -187,7 +187,7 @@ def _render_card(path: str, draft: NoteDraft) -> str:
     if draft.tasks:
         lines.extend(["", "📋 <b>Задачи</b>"])
         for task in draft.tasks[:MAX_CARD_TASKS]:
-            lines.append(f"☐ {html.escape(_shorten(task, TASK_LIMIT))}")
+            lines.append(f"• {html.escape(_shorten(task, TASK_LIMIT))}")
         hidden = len(draft.tasks) - MAX_CARD_TASKS
         if hidden > 0:
             lines.append(f"…и ещё {hidden}")

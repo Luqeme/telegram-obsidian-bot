@@ -75,8 +75,8 @@ def test_card_lists_tasks() -> None:
         "00_Inbox/x.md", _draft_with_tasks(["Оплатить интернет", "Купить хлеб"])
     )
     assert "📋 <b>Задачи</b>" in card
-    assert "☐ Оплатить интернет" in card
-    assert "☐ Купить хлеб" in card
+    assert "• Оплатить интернет" in card
+    assert "• Купить хлеб" in card
     assert "Задач: 2" not in card
 
 
@@ -86,7 +86,7 @@ def test_card_limits_task_list() -> None:
     tasks = [f"Задача номер {i}" for i in range(MAX_CARD_TASKS + 5)]
     card = _render_card("00_Inbox/x.md", _draft_with_tasks(tasks))
 
-    assert card.count("☐") == MAX_CARD_TASKS
+    assert card.count("•") == MAX_CARD_TASKS
     assert "…и ещё 5" in card
 
 
