@@ -1,6 +1,5 @@
 [Unit]
 Description=Telegram Obsidian Bot
-Documentation=https://github.com/Luqeme/telegram-obsidian-bot
 After=network-online.target
 Wants=network-online.target
 

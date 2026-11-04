@@ -4,6 +4,8 @@
 
 Наговорил мысль на бегу → через несколько секунд она лежит в `00_Inbox/` твоего хранилища с заголовком, тегами, выжимкой и чек-листом задач.
 
+> **Хочешь такого же бота себе?** Пошаговая инструкция от нуля до работающего экземпляра — в [FORK.md](FORK.md). Проект распространяется по лицензии MIT.
+
 ## Что умеет
 
 - 🎙 **Голос → текст** — Groq Whisper `whisper-large-v3`, русский язык
@@ -16,7 +18,7 @@
 ## Установка
 
 ```bash
-git clone https://github.com/Luqeme/telegram-obsidian-bot.git
+git clone https://github.com/your-username/telegram-obsidian-bot.git
 cd telegram-obsidian-bot
 python -m venv .venv
 ```
@@ -66,7 +68,7 @@ python bot.py
 
 ```
 ❌ Не удалось прочитать .env:
-  • GITHUB_REPO: ожидается формат owner/repo, например kozhi/my-vault
+  • GITHUB_REPO: ожидается формат owner/repo, например your-username/your-vault
 ```
 
 Дальше — `/start` в Telegram и любая заметка.
@@ -153,7 +155,7 @@ sudo useradd --create-home --shell /bin/bash obsidianbot
 ### 2. Код и зависимости
 
 ```bash
-sudo git clone https://github.com/Luqeme/telegram-obsidian-bot.git /opt/telegram-obsidian-bot
+sudo git clone https://github.com/your-username/telegram-obsidian-bot.git /opt/telegram-obsidian-bot
 sudo chown -R obsidianbot:obsidianbot /opt/telegram-obsidian-bot
 
 sudo -u obsidianbot python3 -m venv /opt/telegram-obsidian-bot/.venv
@@ -238,8 +240,8 @@ Obsidian на Android → Settings → Community plugins → Browse → **Git** 
 
 | Поле | Значение |
 |---|---|
-| Repository URL | `https://github.com/Luqeme/obsidian-vault.git` |
-| Username | `Luqeme` |
+| Repository URL | `https://github.com/your-username/your-vault.git` |
+| Username | твой GitHub-логин |
 | Password | `github_pat_...` |
 
 ### 4. Настройки
@@ -248,12 +250,18 @@ Obsidian на Android → Settings → Community plugins → Browse → **Git** 
 |---|---|
 | Auto pull interval | 5 минут |
 | Pull updates on startup | вкл |
-| Author name / email | `Luqeme` / `26500323+Luqeme@users.noreply.github.com` |
+| Author name / email | твоё имя / твой email |
 
 ### Ограничения
 
 - **Токен истекает.** Через 90 дней синхронизация молча перестанет работать — это самая частая причина «заметки не приходят». Обновляй токен заранее.
 - **Конфликты.** Если править один файл на двух устройствах одновременно, git создаст конфликт. Практически не случается: бот только создаёт новые файлы.
 - **Фоновая синхронизация на Android ограничена** системой. Надёжнее всего синхронизировать при открытии Obsidian (Pull on startup).
+
+---
+
+## Лицензия
+
+MIT. Используй, меняй, разворачивай себе — без ограничений. Подробности в [LICENSE](LICENSE).
 
 

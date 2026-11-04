@@ -76,10 +76,10 @@ class Settings(BaseSettings):
     def _check_repo(cls, value: str) -> str:
         value = value.strip().strip("/")
         if value.count("/") != 1:
-            raise ValueError("ожидается формат owner/repo, например kozhi/my-vault")
+            raise ValueError("ожидается формат owner/repo, например your-username/your-vault")
         owner, repo = value.split("/")
         if not owner or not repo or " " in value:
-            raise ValueError("ожидается формат owner/repo, например kozhi/my-vault")
+            raise ValueError("ожидается формат owner/repo, например your-username/your-vault")
         return value
 
     @field_validator("obsidian_inbox_dir")
