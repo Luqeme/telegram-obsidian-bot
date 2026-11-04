@@ -6,6 +6,7 @@ import csv
 import html
 import io
 import logging
+import re
 from datetime import datetime
 
 from aiogram import F, Router
@@ -169,7 +170,7 @@ async def _run_ask(message: Message, services: Services, question: str) -> None:
 
     sources = "\n".join(f"• {html.escape(note.title)}" for note in found[:3])
     await message.answer(
-        f"{html.escape(answer)}\n\n<blockquote>Источники:\n{sources}</blockquote>",
+        f"{_markdown_to_html(answer)}\n\n<blockquote>Источники:\n{sources}</blockquote>",
         parse_mode="HTML",
         disable_web_page_preview=True,
     )
@@ -258,6 +259,21 @@ async def _read_money(services: Services) -> list[dict]:
 
 def _money(value: float) -> str:
     return f"{value:,.0f}".replace(",", " ")
+
+
+BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.S)
+HEADING_RE = re.compile(r"^#{1,6}\s*(.+)$", re.M)
+BULLET_RE = re.compile(r"^\s*[-*]\s+", re.M)
+
+
+def _markdown_to_html(text: str) -> str:
+    """Мини-конвертер: жирный, заголовки, списки. Остальное — как есть."""
+    escaped = html.escape(text)
+    escaped = BOLD_RE.sub(r"<b>\1</b>", escaped)
+    escaped = HEADING_RE.sub(r"<b>\1</b>", escaped)
+    escaped = BULLET_RE.sub("• ", escaped)
+    escaped = re.sub(r"\n{3,}", "\n\n", escaped)
+    return escaped.strip()
 
 
 def _snippet(text: str, query: str) -> str:
