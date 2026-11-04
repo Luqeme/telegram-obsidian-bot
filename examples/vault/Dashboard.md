@@ -27,7 +27,7 @@ dv.paragraph(
 
 ```dataview
 TABLE WITHOUT ID
-  file.link AS "Заметка",
+  link(file.path, default(title, file.name)) AS "Заметка",
   category AS "Категория",
   tags AS "Теги",
   created AS "Создано"
@@ -180,7 +180,7 @@ if (typeof window.renderChart === "function") {
 ## 📄 Последние
 
 ```dataview
-LIST
+LIST WITHOUT ID link(file.path, default(title, file.name))
 FROM ""
 WHERE file.name != "Dashboard"
 SORT created DESC

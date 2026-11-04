@@ -159,6 +159,7 @@ def build_frontmatter(
     lines = [
         "---",
         f"created: {created:%Y-%m-%dT%H:%M:%S}",
+        f"title: {_yaml_scalar(draft.title)}",
         f"type: inbox-{source}",
         f"category: {draft.category}",
     ]

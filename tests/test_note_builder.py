@@ -47,6 +47,7 @@ def test_frontmatter_is_valid_yaml() -> None:
 
     # YAML парсит ISO-дату в datetime — именно этого ждёт Dataview
     assert front["created"] == datetime(2026, 11, 3, 14, 30, 5)
+    assert front["title"] == "Рефакторинг авторизации на JWT"
     assert front["type"] == "inbox-voice"
     assert front["category"] == "Задача"
     assert front["tags"] == ["backend", "пет-проект"]
