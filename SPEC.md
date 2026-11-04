@@ -280,7 +280,7 @@ POST https://api.groq.com/openai/v1/chat/completions
 
 ```yaml
 ---
-created: 2026-11-03 14:30
+created: 2026-11-03T14:30:00
 type: inbox-voice
 category: Задача
 tags:
@@ -292,7 +292,7 @@ source: telegram
 ```
 
 Правила:
-- `created` — локальное время в `TIMEZONE`, формат `YYYY-MM-DD HH:MM`, **без кавычек** (Obsidian распознаёт как datetime).
+- `created` — локальное время в `TIMEZONE`, формат **ISO 8601** `YYYY-MM-DDTHH:MM:SS`, без кавычек. Именно этот формат Dataview парсит как дату; вариант с пробелом остаётся строкой и ломает запросы.
 - `type` — `inbox-voice` | `inbox-text` (ставит код по типу входящего сообщения).
 - `category` — одно значение из enum, строка.
 - `tags` — YAML-список, 2–4 элемента. Значения санитизируются: нижний регистр, пробелы → `-`, вырезаются `#`, `:`, `[`, `]`, `,`, кавычки. Дубликаты убираются.
@@ -304,7 +304,7 @@ source: telegram
 
 ```markdown
 ---
-created: 2026-11-03 14:30
+created: 2026-11-03T14:30:00
 type: inbox-voice
 category: Задача
 tags:

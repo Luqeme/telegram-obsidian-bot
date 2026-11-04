@@ -85,8 +85,9 @@ if (typeof window.renderChart !== "function") {
 } else {
   const byDay = {}
   for (const p of dv.pages()) {
-    if (!p.created) continue
-    const key = p.created.toFormat("yyyy-MM-dd")
+    const d = p.created
+    if (!d) continue
+    const key = typeof d.toFormat === "function" ? d.toFormat("yyyy-MM-dd") : String(d).slice(0, 10)
     byDay[key] = (byDay[key] ?? 0) + 1
   }
   const keys = Object.keys(byDay).sort().slice(-14)

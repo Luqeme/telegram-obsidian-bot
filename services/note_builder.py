@@ -158,7 +158,7 @@ def build_frontmatter(
 ) -> str:
     lines = [
         "---",
-        f"created: {created:%Y-%m-%d %H:%M}",
+        f"created: {created:%Y-%m-%dT%H:%M:%S}",
         f"type: inbox-{source}",
         f"category: {draft.category}",
     ]
