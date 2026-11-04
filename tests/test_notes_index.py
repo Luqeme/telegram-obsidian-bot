@@ -65,3 +65,33 @@ def test_stem_and_folder() -> None:
     note = parse_note("20_Projects/Заметка 2026-11-04.md", "---\ntitle: x\n---\n")
     assert note.stem == "Заметка 2026-11-04"
     assert note.folder == "20_Projects"
+
+
+def test_task_text_strips_metadata() -> None:
+    from services.notes_index import task_text
+
+    assert task_text("Оплатить интернет 📅 2026-11-06 ⏫") == "Оплатить интернет"
+    assert task_text("Позвонить ✅ 2026-11-04") == "Позвонить"
+
+
+def test_task_due_extracted() -> None:
+    from services.notes_index import task_due
+
+    assert task_due("Купить хлеб 📅 2026-11-05 🔼") == "2026-11-05"
+    assert task_due("Без срока") == ""
+
+
+def test_task_id_depends_on_path() -> None:
+    from services.notes_index import task_id
+
+    assert task_id("a.md", "текст") != task_id("b.md", "текст")
+    assert task_id("a.md", "текст") == task_id("a.md", "текст")
+
+
+def test_seconds_until_is_within_a_day() -> None:
+    from zoneinfo import ZoneInfo
+
+    from handlers.digest import _seconds_until
+
+    delay = _seconds_until("00:00", ZoneInfo("Asia/Yekaterinburg"))
+    assert 0 < delay <= 86400

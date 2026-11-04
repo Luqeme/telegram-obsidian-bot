@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import re
 from dataclasses import dataclass
@@ -21,6 +22,9 @@ logger = logging.getLogger(__name__)
 
 TASK_RE = re.compile(r"^[ \t]*- \[ \] (.+)$", re.MULTILINE)
 HEADING_RE = re.compile(r"^# (.+)$", re.MULTILINE)
+DUE_RE = re.compile(r"📅\s*(\d{4}-\d{2}-\d{2})")
+DONE_RE = re.compile(r"✅\s*\d{4}-\d{2}-\d{2}")
+PRIORITY_MARKS = ("⏫", "🔼", "🔽")
 
 DEFAULT_TTL = 600
 MAX_FILES = 500
@@ -45,6 +49,39 @@ class NoteInfo:
     @property
     def folder(self) -> str:
         return str(PurePosixPath(self.path).parent)
+
+
+def task_text(raw: str) -> str:
+    """Убирает служебные метки Tasks: срок, приоритет, отметку выполнения."""
+    text = DUE_RE.sub("", raw)
+    text = DONE_RE.sub("", text)
+    for mark in PRIORITY_MARKS:
+        text = text.replace(mark, "")
+    return " ".join(text.split())
+
+
+def task_due(raw: str) -> str:
+    match = DUE_RE.search(raw)
+    return match.group(1) if match else ""
+
+
+def task_id(path: str, raw: str) -> str:
+    return hashlib.sha1(f"{path}\n{raw}".encode("utf-8")).hexdigest()[:16]
+
+
+@dataclass(slots=True)
+class TaskRef:
+    note: NoteInfo
+    raw: str
+    id: str
+
+    @property
+    def text(self) -> str:
+        return task_text(self.raw)
+
+    @property
+    def due(self) -> str:
+        return task_due(self.raw)
 
 
 def parse_note(path: str, raw: str) -> NoteInfo:
@@ -194,3 +231,17 @@ class NotesIndex:
                 key = tag.casefold()
                 counts[key] = counts.get(key, 0) + 1
         return sorted(counts, key=lambda tag: (-counts[tag], tag))[:limit]
+
+    async def open_tasks(self) -> list[TaskRef]:
+        refs: list[TaskRef] = []
+        for note in await self.notes():
+            for raw in note.tasks:
+                refs.append(TaskRef(note=note, raw=raw, id=task_id(note.path, raw)))
+        return refs
+
+    async def find_task(self, identifier: str) -> TaskRef | None:
+        for note in await self.notes():
+            for raw in note.tasks:
+                if task_id(note.path, raw) == identifier:
+                    return TaskRef(note=note, raw=raw, id=identifier)
+        return None

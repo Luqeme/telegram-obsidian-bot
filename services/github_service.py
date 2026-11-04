@@ -117,6 +117,64 @@ class GitHubService:
             if item.get("type") == "blob" and item["path"].endswith(".md")
         ]
 
+    async def replace_line(
+        self, path: str, old_line: str, new_line: str, commit_message: str
+    ) -> bool:
+        """Меняет одну строку в файле. False, если строки уже нет."""
+        url = f"{API_URL}/repos/{self._repo}/contents/{quote(path, safe='/')}"
+
+        for attempt in range(2):
+            try:
+                response = await self._client.get(
+                    url,
+                    headers=self._headers,
+                    params={"ref": self._branch},
+                    timeout=FILE_TIMEOUT,
+                )
+            except httpx.HTTPError as exc:
+                raise GitHubError(
+                    f"GitHub недоступен: {exc!r}",
+                    "❌ GitHub временно недоступен, попробуй ещё раз.",
+                ) from exc
+
+            if response.status_code == 404:
+                return False
+            if response.status_code != 200:
+                raise GitHubError(
+                    f"GitHub GET {path}: {response.status_code}",
+                    "❌ Не удалось прочитать заметку.",
+                )
+
+            data = response.json()
+            content = base64.b64decode(data["content"]).decode("utf-8")
+            if old_line not in content:
+                return False
+
+            payload = {
+                "message": commit_message,
+                "content": base64.b64encode(
+                    content.replace(old_line, new_line, 1).encode("utf-8")
+                ).decode("ascii"),
+                "sha": data["sha"],
+                "branch": self._branch,
+            }
+
+            put = await self._client.put(
+                url, json=payload, headers=self._headers, timeout=FILE_TIMEOUT
+            )
+            if put.status_code in (200, 201):
+                return True
+            if put.status_code == 409 and attempt == 0:
+                logger.warning("GitHub: конфликт при правке строки, повторяю")
+                continue
+
+            raise GitHubError(
+                f"GitHub PUT {path}: {put.status_code}",
+                "❌ Не удалось обновить заметку.",
+            )
+
+        return False
+
     async def append_line(
         self,
         path: str,

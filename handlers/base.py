@@ -1,4 +1,4 @@
-"""Служебные команды: /start, /help, /id, /find, /today, /money."""
+"""Служебные команды: /start, /help, /id, /find, /ask, /money."""
 
 from __future__ import annotations
 
@@ -12,15 +12,16 @@ from aiogram import Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
-from services import GitHubError, Services
+from services import GitHubError, GroqError, Services
 
 router = Router(name="base")
 logger = logging.getLogger(__name__)
 
 MONEY_PATH = "30_Money/transactions.csv"
 SEARCH_LIMIT = 5
-TASK_LIMIT = 5
 SNIPPET_PAD = 60
+ASK_CONTEXT_NOTES = 5
+ASK_CONTEXT_CHARS = 700
 
 
 @router.message(CommandStart())
@@ -31,6 +32,7 @@ async def cmd_start(message: Message) -> None:
         "теги и задачи и сохраню заметку в Obsidian.\n\n"
         "Команды:\n"
         "/find — поиск по базе\n"
+        "/ask — вопрос к базе\n"
         "/today — сводка на сегодня\n"
         "/money — деньги за месяц\n"
         "/id — твой Telegram ID\n"
@@ -46,11 +48,13 @@ async def cmd_help(message: Message) -> None:
         "Что я делаю:\n"
         "• расшифровываю голос;\n"
         "• выделяю заголовок, суть и задачи;\n"
+        "• ставлю сроки и приоритеты в формате Tasks;\n"
         "• подбираю теги и связанные заметки;\n"
         "• сохраняю .md в репозиторий Obsidian.\n\n"
         "<b>Команды</b>\n"
         "/find <i>запрос</i> — поиск по заметкам\n"
-        "/today — что сегодня: заметки, задачи, траты\n"
+        "/ask <i>вопрос</i> — ответ по содержимому базы\n"
+        "/today — что сегодня, с кнопками закрытия задач\n"
         "/money — доход и расход за месяц\n\n"
         "Деньги: «потратил 540 на обед», «заработал 5000» — запишу в отдельный файл.\n\n"
         "Если что-то сломалось — пришлю текст обратно, ничего не потеряется.",
@@ -73,7 +77,7 @@ async def cmd_id(message: Message) -> None:
 
 @router.message(Command("find"))
 async def cmd_find(message: Message, services: Services) -> None:
-    query = (message.text or "").partition(" ")[2].strip()
+    query = _argument(message)
     if len(query) < 2:
         await message.answer("🔎 Что искать? Например: <code>/find JWT</code>", parse_mode="HTML")
         return
@@ -107,53 +111,46 @@ async def cmd_find(message: Message, services: Services) -> None:
     )
 
 
-@router.message(Command("today"))
-async def cmd_today(message: Message, services: Services) -> None:
+@router.message(Command("ask"))
+async def cmd_ask(message: Message, services: Services) -> None:
+    question = _argument(message)
+    if len(question) < 3:
+        await message.answer(
+            "💬 О чём спросить? Например: <code>/ask что я писал про дашборд</code>",
+            parse_mode="HTML",
+        )
+        return
+
     try:
-        notes = await services.index.notes()
-        money_rows = await _read_money(services)
+        found = await services.index.search(question, limit=ASK_CONTEXT_NOTES)
     except GitHubError as exc:
-        logger.error("today: %s", exc)
+        logger.error("ask: %s", exc)
         await message.answer(exc.user_message)
         return
 
-    tz = services.settings.tz
-    now = datetime.now(tz)
-    today = now.date()
+    if not found:
+        await message.answer(
+            f"💬 В базе нет заметок по запросу «{html.escape(question)}»."
+        )
+        return
 
-    today_notes = [
-        note
-        for note in notes
-        if note.created is not None and note.created.astimezone(tz).date() == today
-    ]
-    open_tasks = [(note.title, task) for note in notes for task in note.tasks]
-    today_money = [row for row in money_rows if row.get("date") == today.isoformat()]
+    context = "\n\n".join(
+        f"### {note.title}\n{note.text[:ASK_CONTEXT_CHARS]}" for note in found
+    )
 
-    spent = sum(float(row["amount"]) for row in today_money if row.get("kind") == "expense")
-    earned = sum(float(row["amount"]) for row in today_money if row.get("kind") == "income")
+    try:
+        answer = await services.groq.answer_question(question, context)
+    except GroqError as exc:
+        logger.error("ask: %s", exc)
+        await message.answer(exc.user_message)
+        return
 
-    lines = [
-        f"📅 <b>Сегодня, {now:%d.%m}</b>",
-        "",
-        f"Заметок: <b>{len(today_notes)}</b>",
-        f"Открытых задач: <b>{len(open_tasks)}</b>",
-    ]
-    if spent or earned:
-        lines.append(f"Потрачено: <b>{_money(spent)} ₽</b> · Получено: <b>{_money(earned)} ₽</b>")
-
-    if today_notes:
-        lines.extend(["", "<b>Новое</b>"])
-        for note in today_notes[:5]:
-            lines.append(f"• {html.escape(note.title)}")
-
-    if open_tasks:
-        lines.extend(["", "<b>Задачи</b>"])
-        for _, task in open_tasks[:TASK_LIMIT]:
-            lines.append(f"☐ {html.escape(task)}")
-        if len(open_tasks) > TASK_LIMIT:
-            lines.append(f"…и ещё {len(open_tasks) - TASK_LIMIT}")
-
-    await message.answer("\n".join(lines), parse_mode="HTML")
+    sources = "\n".join(f"• {html.escape(note.title)}" for note in found[:3])
+    await message.answer(
+        f"{html.escape(answer)}\n\n<blockquote>Источники:\n{sources}</blockquote>",
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
 
 
 @router.message(Command("money"))
@@ -201,6 +198,10 @@ async def cmd_money(message: Message, services: Services) -> None:
 
 
 # ── Вспомогательное ──────────────────────────────────────────
+
+
+def _argument(message: Message) -> str:
+    return (message.text or "").partition(" ")[2].strip()
 
 
 async def _read_money(services: Services) -> list[dict]:

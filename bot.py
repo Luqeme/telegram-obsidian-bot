@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from config import get_settings
 from handlers import base as base_handlers
+from handlers import digest as digest_handlers
 from handlers import notes as notes_handlers
 from middlewares.auth import AllowedUsersMiddleware
 from services import GitHubService, GroqService, NotesIndex, Services
@@ -111,8 +112,11 @@ async def main() -> int:
         dispatcher.workflow_data["services"] = services
         dispatcher.message.middleware(AllowedUsersMiddleware(settings.allowed_user_ids))
         dispatcher.include_router(base_handlers.router)
+        dispatcher.include_router(digest_handlers.router)
         dispatcher.include_router(notes_handlers.router)
         dispatcher.errors.register(on_error)
+
+        digest_task: asyncio.Task | None = None
 
         try:
             try:
@@ -121,6 +125,7 @@ async def main() -> int:
                         BotCommand(command="start", description="Начать"),
                         BotCommand(command="help", description="Как это работает"),
                         BotCommand(command="find", description="Поиск по заметкам"),
+                        BotCommand(command="ask", description="Вопрос к базе"),
                         BotCommand(command="today", description="Сводка на сегодня"),
                         BotCommand(command="money", description="Деньги за месяц"),
                         BotCommand(command="id", description="Мой Telegram ID"),
@@ -135,10 +140,18 @@ async def main() -> int:
                 )
                 return 1
 
+            digest_task = (
+                asyncio.create_task(digest_handlers.digest_loop(bot, services))
+                if settings.digest_time
+                else None
+            )
+
             await dispatcher.start_polling(
                 bot, allowed_updates=dispatcher.resolve_used_update_types()
             )
         finally:
+            if digest_task is not None:
+                digest_task.cancel()
             await bot.session.close()
             logger.info("Бот остановлен")
 

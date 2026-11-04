@@ -29,6 +29,17 @@ WEEKDAYS = (
     "воскресенье",
 )
 
+ANSWER_PROMPT = """Ты — помощник по личной базе заметок пользователя.
+Отвечай ТОЛЬКО по предоставленным заметкам. Если в них нет ответа — честно скажи,
+что в базе этого не нашлось, и не додумывай.
+
+Правила:
+- 2–5 предложений, по-русски, без вступлений вроде «Конечно» или «Вот что я нашёл».
+- Не выдумывай факты, даты, имена и суммы.
+- Если заметки противоречат друг другу — отметь это.
+- Если уместно, назови заголовок заметки, из которой взят ответ.
+"""
+
 STT_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
 LLM_TIMEOUT = httpx.Timeout(60.0, connect=10.0)
 
@@ -174,6 +185,36 @@ class GroqService:
 
         logger.debug("LLM: source=%s title=%r", source, draft.title)
         return draft
+
+    # ── Ответ по заметкам ────────────────────────────────────
+
+    async def answer_question(self, question: str, context: str) -> str:
+        payload = {
+            "model": self._llm_model,
+            "messages": [
+                {"role": "system", "content": ANSWER_PROMPT},
+                {"role": "system", "content": f"Заметки:\n{context}"},
+                {"role": "user", "content": question},
+            ],
+            "temperature": 0.2,
+            "max_completion_tokens": 600,
+        }
+
+        response = await self._post_with_retry(
+            f"{API_URL}/chat/completions",
+            what="LLM",
+            user_message="❌ Не удалось ответить по базе. Попробуй переформулировать.",
+            timeout=LLM_TIMEOUT,
+            json=payload,
+        )
+
+        try:
+            return response.json()["choices"][0]["message"]["content"].strip()
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise GroqError(
+                f"Неожиданный ответ LLM: {response.text[:300]}",
+                "❌ Не удалось ответить по базе.",
+            ) from exc
 
     # ── Общий транспорт ──────────────────────────────────────
 

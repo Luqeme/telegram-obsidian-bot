@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -60,6 +61,18 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     max_audio_mb: int = Field(default=20, ge=1, le=100)
     filename_transliterate: bool = True
+    digest_time: str = "09:00"
+
+    @field_validator("digest_time")
+    @classmethod
+    def _check_digest_time(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            return ""
+        match = re.fullmatch(r"([01]?\d|2[0-3]):([0-5]\d)", value)
+        if match is None:
+            raise ValueError("ожидается формат HH:MM, например 09:00")
+        return f"{int(match.group(1)):02d}:{match.group(2)}"
 
     # ── Валидаторы ────────────────────────────────────────────
 
