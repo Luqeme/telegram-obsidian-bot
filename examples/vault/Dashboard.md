@@ -229,29 +229,6 @@ if (stale.length) {
 }
 ```
 
-```dataviewjs
-const pages = dv.pages().where((p) => (p.file.tags ?? []).length > 0)
-const rows = []
-for (let i = 0; i < pages.length; i++) {
-  for (let j = i + 1; j < pages.length; j++) {
-    const a = pages[i]
-    const b = pages[j]
-    const shared = (a.file.tags ?? []).filter((t) => (b.file.tags ?? []).includes(t))
-    if (shared.length >= 2) {
-      rows.push([
-        dv.fileLink(a.file.path, false, a.title ?? a.file.name),
-        dv.fileLink(b.file.path, false, b.title ?? b.file.name),
-        shared.join(", ")
-      ])
-    }
-  }
-}
-if (rows.length) {
-  dv.header(4, "🔗 Похожие заметки")
-  dv.table(["Заметка", "Похожая", "Общие теги"], rows.slice(0, 15))
-}
-```
-
 ---
 
 ## 📄 Последние
