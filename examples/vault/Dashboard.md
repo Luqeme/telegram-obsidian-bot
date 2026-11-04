@@ -40,11 +40,18 @@ SORT created DESC
 
 ## ✅ Задачи
 
-```dataview
-TASK
-FROM ""
-WHERE !completed
-SORT file.name ASC
+```dataviewjs
+const tasks = []
+for (const p of dv.pages()) {
+  for (const t of p.file.tasks ?? []) {
+    if (!t.completed) tasks.push(t)
+  }
+}
+if (tasks.length) {
+  dv.taskList(tasks, false)
+} else {
+  dv.paragraph("Открытых задач нет.")
+}
 ```
 
 ---
