@@ -78,6 +78,45 @@ class GitHubService:
             "❌ Не удалось сохранить: имя файла занято 5 раз подряд.",
         )
 
+    async def get_text(self, path: str) -> str:
+        """Читает файл из репозитория. Пустая строка, если файла нет."""
+        url = f"{API_URL}/repos/{self._repo}/contents/{quote(path, safe='/')}"
+        response = await self._client.get(
+            url,
+            headers=self._headers,
+            params={"ref": self._branch},
+            timeout=FILE_TIMEOUT,
+        )
+        if response.status_code == 404:
+            return ""
+        if response.status_code != 200:
+            raise GitHubError(
+                f"GitHub GET {path}: {response.status_code}",
+                "❌ Не удалось прочитать данные из GitHub.",
+            )
+        return base64.b64decode(response.json()["content"]).decode("utf-8")
+
+    async def list_markdown_paths(self) -> list[str]:
+        """Все .md файлы ветки, одним запросом через Trees API."""
+        url = f"{API_URL}/repos/{self._repo}/git/trees/{quote(self._branch, safe='')}"
+        response = await self._client.get(
+            url,
+            headers=self._headers,
+            params={"recursive": "1"},
+            timeout=FILE_TIMEOUT,
+        )
+        if response.status_code != 200:
+            raise GitHubError(
+                f"GitHub trees: {response.status_code}",
+                "❌ Не удалось получить список заметок.",
+            )
+        tree = response.json().get("tree", [])
+        return [
+            item["path"]
+            for item in tree
+            if item.get("type") == "blob" and item["path"].endswith(".md")
+        ]
+
     async def append_line(
         self,
         path: str,

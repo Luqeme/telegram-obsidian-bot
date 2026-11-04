@@ -123,3 +123,20 @@ def test_numeric_tag_is_quoted_in_yaml() -> None:
 def test_no_tasks_key_when_llm_says_not_meaningful() -> None:
     draft = make_draft(is_meaningful=False, tasks=[])
     assert draft.is_meaningful is False
+
+
+def test_related_section_rendered() -> None:
+    markdown = build_markdown(
+        make_draft(),
+        ORIGINAL,
+        "voice",
+        NOW,
+        related=[("Дашборд 2026-11-04", "Дашборд")],
+    )
+    assert "## 🔗 Связанное" in markdown
+    assert "- [[Дашборд 2026-11-04|Дашборд]]" in markdown
+
+
+def test_no_related_section_when_empty() -> None:
+    markdown = build_markdown(make_draft(), ORIGINAL, "voice", NOW)
+    assert "Связанное" not in markdown

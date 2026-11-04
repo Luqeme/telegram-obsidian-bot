@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Sequence
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -202,6 +202,7 @@ def build_markdown(
     original_text: str,
     source: NoteSource,
     created: datetime,
+    related: Sequence[tuple[str, str]] = (),
 ) -> str:
     parts: list[str] = [
         build_frontmatter(draft, source, created),
@@ -216,6 +217,12 @@ def build_markdown(
     if draft.tasks:
         parts.append("## 📋 Задачи")
         parts.extend(f"- [ ] {task}" for task in draft.tasks)
+        parts.append("")
+
+    if related:
+        parts.append("## 🔗 Связанное")
+        for stem, title in related:
+            parts.append(f"- [[{stem}|{title}]]")
         parts.append("")
 
     parts.extend(

@@ -1,4 +1,4 @@
-"""Сервисный слой: LLM, GitHub и сборка заметки."""
+"""Сервисный слой: LLM, GitHub, индекс заметок и сборка заметки."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from .note_builder import (
     sanitize_tag,
     slugify,
 )
+from .notes_index import NoteInfo, NotesIndex
 
 __all__ = [
     "GitHubError",
@@ -23,6 +24,8 @@ __all__ = [
     "GroqError",
     "GroqService",
     "NoteDraft",
+    "NoteInfo",
+    "NotesIndex",
     "Services",
     "build_markdown",
     "make_filename",
@@ -39,3 +42,4 @@ class Services:
     settings: Settings
     groq: GroqService
     github: GitHubService
+    index: NotesIndex

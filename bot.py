@@ -19,7 +19,7 @@ from config import get_settings
 from handlers import base as base_handlers
 from handlers import notes as notes_handlers
 from middlewares.auth import AllowedUsersMiddleware
-from services import GitHubService, GroqService, Services
+from services import GitHubService, GroqService, NotesIndex, Services
 
 logger = logging.getLogger("bot")
 
@@ -87,6 +87,13 @@ async def main() -> int:
     )
 
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        github = GitHubService(
+            client,
+            token=settings.github_token,
+            repo=settings.github_repo,
+            branch=settings.github_branch,
+            inbox_dir=settings.obsidian_inbox_dir,
+        )
         services = Services(
             settings=settings,
             groq=GroqService(
@@ -95,13 +102,8 @@ async def main() -> int:
                 stt_model=settings.groq_stt_model,
                 llm_model=settings.groq_llm_model,
             ),
-            github=GitHubService(
-                client,
-                token=settings.github_token,
-                repo=settings.github_repo,
-                branch=settings.github_branch,
-                inbox_dir=settings.obsidian_inbox_dir,
-            ),
+            github=github,
+            index=NotesIndex(github),
         )
 
         bot = Bot(token=settings.telegram_bot_token)
@@ -118,6 +120,9 @@ async def main() -> int:
                     [
                         BotCommand(command="start", description="Начать"),
                         BotCommand(command="help", description="Как это работает"),
+                        BotCommand(command="find", description="Поиск по заметкам"),
+                        BotCommand(command="today", description="Сводка на сегодня"),
+                        BotCommand(command="money", description="Деньги за месяц"),
                         BotCommand(command="id", description="Мой Telegram ID"),
                     ]
                 )

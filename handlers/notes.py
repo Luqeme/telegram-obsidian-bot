@@ -160,7 +160,16 @@ async def _process(
         await _save_money(message, services, draft, original, created)
         return
 
-    content = build_markdown(draft, original, source, created)  # type: ignore[arg-type]
+    related: list[tuple[str, str]] = []
+    try:
+        for note in await services.index.similar(draft.tags, limit=2):
+            related.append((note.stem, note.title))
+    except GitHubError as exc:
+        logger.warning("Не удалось найти связанные заметки: %s", exc)
+
+    content = build_markdown(
+        draft, original, source, created, related=related  # type: ignore[arg-type]
+    )
     filename = make_filename(
         draft.title,
         created,
@@ -186,6 +195,7 @@ async def _process(
         len(text),
         path,
     )
+    services.index.invalidate()
     await message.answer(
         _render_card(path, draft),
         parse_mode="HTML",
