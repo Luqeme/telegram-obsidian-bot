@@ -156,6 +156,7 @@ class NotesIndex:
         self._github = github
         self._ttl = ttl
         self._notes: list[NoteInfo] = []
+        self._cache: dict[str, tuple[str, NoteInfo]] = {}
         self._loaded_at = 0.0
         self._lock = asyncio.Lock()
 
@@ -171,31 +172,53 @@ class NotesIndex:
             if not force and self._notes and loop.time() - self._loaded_at < self._ttl:
                 return self._notes
 
-            paths = [
-                path
-                for path in await self._github.list_markdown_paths()
+            blobs = [
+                (path, sha)
+                for path, sha in await self._github.list_markdown_blobs()
                 if PurePosixPath(path).name not in SKIP_NAMES
                 and not path.startswith(".")
             ]
-            if len(paths) > MAX_FILES:
-                logger.warning("Заметок %s, индексирую первые %s", len(paths), MAX_FILES)
-                paths = paths[:MAX_FILES]
+            if len(blobs) > MAX_FILES:
+                logger.warning("Заметок %s, индексирую первые %s", len(blobs), MAX_FILES)
+                blobs = blobs[:MAX_FILES]
+
+            known: dict[str, NoteInfo] = {}
+            to_fetch: list[tuple[str, str]] = []
+            for path, sha in blobs:
+                cached = self._cache.get(path)
+                if cached is not None and cached[0] == sha:
+                    known[path] = cached[1]
+                else:
+                    to_fetch.append((path, sha))
 
             semaphore = asyncio.Semaphore(FETCH_CONCURRENCY)
 
-            async def load_one(path: str) -> NoteInfo | None:
+            async def load_one(path: str, sha: str) -> tuple[str, str, NoteInfo | None]:
                 async with semaphore:
                     try:
                         raw = await self._github.get_text(path)
                     except GitHubError as exc:
                         logger.warning("Не прочитал %s: %s", path, exc)
-                        return None
-                return parse_note(path, raw) if raw else None
+                        return path, sha, None
+                return path, sha, parse_note(path, raw) if raw else None
 
-            loaded = await asyncio.gather(*(load_one(path) for path in paths))
-            self._notes = [note for note in loaded if note is not None]
+            loaded = await asyncio.gather(
+                *(load_one(path, sha) for path, sha in to_fetch)
+            )
+            for path, sha, note in loaded:
+                if note is not None:
+                    known[path] = note
+                    self._cache[path] = (sha, note)
+
+            current = {path for path, _ in blobs}
+            self._cache = {
+                path: value for path, value in self._cache.items() if path in current
+            }
+            self._notes = [known[path] for path, _ in blobs if path in known]
             self._loaded_at = loop.time()
-            logger.info("Индекс заметок: %s файлов", len(self._notes))
+            logger.info(
+                "Индекс заметок: %s всего, %s обновлено", len(self._notes), len(to_fetch)
+            )
             return self._notes
 
     def invalidate(self) -> None:

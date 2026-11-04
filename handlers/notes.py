@@ -83,17 +83,54 @@ async def handle_text(message: Message, bot: Bot, services: Services) -> None:
     await _process(bot, message, services, text=text, original=text, source="text")
 
 
-@router.message(F.voice)
-async def handle_voice(message: Message, bot: Bot, services: Services) -> None:
-    voice = message.voice
-    if voice is None:
-        return
+AUDIO_EXTENSIONS = (
+    ".ogg",
+    ".oga",
+    ".mp3",
+    ".m4a",
+    ".wav",
+    ".flac",
+    ".webm",
+    ".mp4",
+)
 
-    size = voice.file_size or 0
-    duration = voice.duration or 0
+
+def _media_info(message: Message) -> tuple[str, int, int, str] | None:
+    """file_id, размер, длительность, имя файла — для любого аудио-вложения."""
+    if message.voice is not None:
+        voice = message.voice
+        return voice.file_id, voice.file_size or 0, voice.duration or 0, "voice.ogg"
+
+    if message.video_note is not None:
+        note = message.video_note
+        return note.file_id, note.file_size or 0, note.duration or 0, "note.mp4"
+
+    if message.audio is not None:
+        audio = message.audio
+        name = audio.file_name or "audio.mp3"
+        return audio.file_id, audio.file_size or 0, audio.duration or 0, name
+
+    if message.document is not None:
+        document = message.document
+        name = document.file_name or "audio.bin"
+        mime = document.mime_type or ""
+        if mime.startswith("audio/") or name.lower().endswith(AUDIO_EXTENSIONS):
+            return document.file_id, document.file_size or 0, 0, name
+
+    return None
+
+
+@router.message(F.voice | F.video_note | F.audio | F.document)
+async def handle_voice(message: Message, bot: Bot, services: Services) -> None:
+    info = _media_info(message)
+    if info is None:
+        return  # обычный документ — не наше дело
+
+    file_id, size, duration, filename = info
     logger.info(
-        "voice_received user_id=%s duration=%s size=%s",
+        "media_received user_id=%s file=%s duration=%s size=%s",
         message.from_user.id if message.from_user else 0,
+        filename,
         duration,
         size,
     )
@@ -107,9 +144,9 @@ async def handle_voice(message: Message, bot: Bot, services: Services) -> None:
 
     # Аудио живёт только в памяти: на диск ничего не пишем и удалять нечего.
     try:
-        buffer = await bot.download(voice)
+        buffer = await bot.download(file_id)
     except TelegramAPIError as exc:
-        logger.error("download voice: %s", exc)
+        logger.error("download media: %s", exc)
         await message.answer("❌ Не удалось скачать аудио. Попробуй ещё раз.")
         return
 
@@ -118,7 +155,7 @@ async def handle_voice(message: Message, bot: Bot, services: Services) -> None:
         return
 
     try:
-        text = await services.groq.transcribe_audio(buffer.read(), filename="voice.ogg")
+        text = await services.groq.transcribe_audio(buffer.read(), filename=filename)
     except GroqError as exc:
         logger.error("transcribe_audio: %s", exc)
         await message.answer(exc.user_message)

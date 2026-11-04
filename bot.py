@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from config import get_settings
 from handlers import base as base_handlers
 from handlers import digest as digest_handlers
+from handlers import health as health_handlers
 from handlers import notes as notes_handlers
 from middlewares.auth import AllowedUsersMiddleware
 from services import GitHubService, GroqService, NotesIndex, Services
@@ -116,7 +117,7 @@ async def main() -> int:
         dispatcher.include_router(notes_handlers.router)
         dispatcher.errors.register(on_error)
 
-        digest_task: asyncio.Task | None = None
+        background: list[asyncio.Task] = []
 
         try:
             try:
@@ -140,18 +141,24 @@ async def main() -> int:
                 )
                 return 1
 
-            digest_task = (
-                asyncio.create_task(digest_handlers.digest_loop(bot, services))
-                if settings.digest_time
-                else None
+            background.append(
+                asyncio.create_task(health_handlers.health_loop(bot, services))
             )
+            if settings.digest_time:
+                background.append(
+                    asyncio.create_task(digest_handlers.digest_loop(bot, services))
+                )
+            if settings.weekly_ping_time:
+                background.append(
+                    asyncio.create_task(health_handlers.weekly_loop(bot, services))
+                )
 
             await dispatcher.start_polling(
                 bot, allowed_updates=dispatcher.resolve_used_update_types()
             )
         finally:
-            if digest_task is not None:
-                digest_task.cancel()
+            for task in background:
+                task.cancel()
             await bot.session.close()
             logger.info("Бот остановлен")
 

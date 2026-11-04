@@ -78,6 +78,25 @@ class GitHubService:
             "❌ Не удалось сохранить: имя файла занято 5 раз подряд.",
         )
 
+    async def check_access(self) -> tuple[bool, str]:
+        """Проверка, что репозиторий и токен живы."""
+        try:
+            response = await self._client.get(
+                f"{API_URL}/repos/{self._repo}",
+                headers=self._headers,
+                timeout=FILE_TIMEOUT,
+            )
+        except httpx.HTTPError as exc:
+            return False, f"сеть недоступна: {exc!r}"
+
+        if response.status_code == 200:
+            return True, ""
+        if response.status_code == 401:
+            return False, "токен недействителен или отозван"
+        if response.status_code == 404:
+            return False, f"репозиторий {self._repo} недоступен"
+        return False, f"HTTP {response.status_code}"
+
     async def get_text(self, path: str) -> str:
         """Читает файл из репозитория. Пустая строка, если файла нет."""
         url = f"{API_URL}/repos/{self._repo}/contents/{quote(path, safe='/')}"
@@ -96,8 +115,8 @@ class GitHubService:
             )
         return base64.b64decode(response.json()["content"]).decode("utf-8")
 
-    async def list_markdown_paths(self) -> list[str]:
-        """Все .md файлы ветки, одним запросом через Trees API."""
+    async def list_markdown_blobs(self) -> list[tuple[str, str]]:
+        """Пары (путь, sha блоба) для всех .md — основа инкрементального индекса."""
         url = f"{API_URL}/repos/{self._repo}/git/trees/{quote(self._branch, safe='')}"
         response = await self._client.get(
             url,
@@ -110,10 +129,9 @@ class GitHubService:
                 f"GitHub trees: {response.status_code}",
                 "❌ Не удалось получить список заметок.",
             )
-        tree = response.json().get("tree", [])
         return [
-            item["path"]
-            for item in tree
+            (item["path"], item["sha"])
+            for item in response.json().get("tree", [])
             if item.get("type") == "blob" and item["path"].endswith(".md")
         ]
 

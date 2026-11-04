@@ -62,8 +62,9 @@ class Settings(BaseSettings):
     max_audio_mb: int = Field(default=20, ge=1, le=100)
     filename_transliterate: bool = True
     digest_time: str = "09:00"
+    weekly_ping_time: str = "10:00"
 
-    @field_validator("digest_time")
+    @field_validator("digest_time", "weekly_ping_time")
     @classmethod
     def _check_digest_time(cls, value: str) -> str:
         value = value.strip()

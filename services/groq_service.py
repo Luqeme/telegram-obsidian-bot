@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import date
+from pathlib import PurePosixPath
 from typing import Any, Sequence
 
 import httpx
@@ -71,13 +72,27 @@ class GroqService:
         self._llm_model = llm_model
         self._headers = {"Authorization": f"Bearer {api_key}"}
 
+    async def check_access(self) -> tuple[bool, str]:
+        try:
+            response = await self._client.get(
+                f"{API_URL}/models", headers=self._headers, timeout=LLM_TIMEOUT
+            )
+        except httpx.HTTPError as exc:
+            return False, f"сеть недоступна: {exc!r}"
+
+        if response.status_code == 200:
+            return True, ""
+        if response.status_code == 401:
+            return False, "ключ недействителен или отозван"
+        return False, f"HTTP {response.status_code}"
+
     # ── Распознавание речи ───────────────────────────────────
 
     async def transcribe_audio(
         self, audio: bytes, filename: str = "voice.ogg"
     ) -> str:
         """Отправляет аудио в Whisper. Возвращает расшифровку (может быть пустой)."""
-        files = {"file": (filename, audio, "audio/ogg")}
+        files = {"file": (filename, audio, _mime_type(filename))}
         data = {
             "model": self._stt_model,
             "language": "ru",
@@ -273,3 +288,19 @@ def _retry_after(response: httpx.Response, attempt: int) -> float:
         return min(float(raw), 10.0)
     except (TypeError, ValueError):
         return float(2**attempt)
+
+
+MIME_BY_EXT = {
+    ".ogg": "audio/ogg",
+    ".oga": "audio/ogg",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".mp4": "video/mp4",
+    ".wav": "audio/wav",
+    ".webm": "audio/webm",
+    ".flac": "audio/flac",
+}
+
+
+def _mime_type(filename: str) -> str:
+    return MIME_BY_EXT.get(PurePosixPath(filename).suffix.lower(), "audio/ogg")
