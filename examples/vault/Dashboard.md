@@ -1,7 +1,3 @@
-`BUTTON[git-pull, git-sync]`
-
-# 🧠 База знаний
-
 ```meta-bind-button
 id: git-pull
 label: Получить
@@ -23,6 +19,10 @@ actions:
   - type: command
     command: obsidian-git:commit-and-sync
 ```
+
+`BUTTON[git-pull, git-sync]`
+
+# 🧠 База знаний
 
 ```dataviewjs
 const pages = dv.pages()
