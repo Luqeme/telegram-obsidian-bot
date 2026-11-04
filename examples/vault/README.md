@@ -13,7 +13,8 @@ cp -r examples/vault/* /path/to/your-vault/
 
 3. Открой папку в Obsidian как хранилище.
 4. Settings → Community plugins → Browse → **Dataview** → Install → Enable.
-5. Открой `Dashboard.md`.
+5. Так же установи **Charts** — он рисует графики.
+6. Открой `Dashboard.md`.
 
 ## Что внутри
 
