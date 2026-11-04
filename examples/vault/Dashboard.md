@@ -1,14 +1,3 @@
-```meta-bind-button
-label: Синхронизировать
-icon: refresh-cw
-style: primary
-actions:
-  - type: command
-    command: obsidian-git:commit-and-sync
-  - type: command
-    command: obsidian-git:pull
-```
-
 # 🧠 База знаний
 
 ```dataviewjs
