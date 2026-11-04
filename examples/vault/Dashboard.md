@@ -59,69 +59,6 @@ if (tasks.length) {
 
 ```dataviewjs
 if (typeof window.renderChart === "function") {
-  const counts = {}
-  for (const p of dv.pages()) {
-    if (!p.category) continue
-    counts[p.category] = (counts[p.category] ?? 0) + 1
-  }
-  const labels = Object.keys(counts)
-  window.renderChart(
-    {
-      type: "doughnut",
-      data: {
-        labels: labels,
-        datasets: [
-          {
-            data: labels.map((l) => counts[l]),
-            backgroundColor: ["#7c6cff", "#4ec9b0", "#e5c07b", "#e06c75", "#61afef"],
-            borderWidth: 0
-          }
-        ]
-      },
-      options: { plugins: { legend: { position: "bottom" } }, cutout: "62%" }
-    },
-    this.container
-  )
-}
-```
-
-```dataviewjs
-if (typeof window.renderChart === "function") {
-  const counts = {}
-  for (const p of dv.pages()) {
-    for (const t of p.file.tags ?? []) {
-      const name = t.replace("#", "")
-      counts[name] = (counts[name] ?? 0) + 1
-    }
-  }
-  const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10)
-  window.renderChart(
-    {
-      type: "bar",
-      data: {
-        labels: top.map((e) => e[0]),
-        datasets: [
-          {
-            label: "Упоминаний",
-            data: top.map((e) => e[1]),
-            backgroundColor: "#4ec9b0",
-            borderRadius: 6
-          }
-        ]
-      },
-      options: {
-        indexAxis: "y",
-        plugins: { legend: { display: false } },
-        scales: { x: { beginAtZero: true, ticks: { precision: 0 } } }
-      }
-    },
-    this.container
-  )
-}
-```
-
-```dataviewjs
-if (typeof window.renderChart === "function") {
   let done = 0
   let open = 0
   for (const p of dv.pages()) {
