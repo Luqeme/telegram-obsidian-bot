@@ -185,3 +185,12 @@ class NotesIndex:
 
         matches.sort(key=lambda pair: (-pair[0], pair[1].title.casefold()))
         return [note for _, note in matches[:limit]]
+
+    async def top_tags(self, limit: int = 30) -> list[str]:
+        """Самые частые теги базы — чтобы модель не плодила синонимы."""
+        counts: dict[str, int] = {}
+        for note in await self.notes():
+            for tag in note.tags:
+                key = tag.casefold()
+                counts[key] = counts.get(key, 0) + 1
+        return sorted(counts, key=lambda tag: (-counts[tag], tag))[:limit]

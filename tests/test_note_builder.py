@@ -140,3 +140,26 @@ def test_related_section_rendered() -> None:
 def test_no_related_section_when_empty() -> None:
     markdown = build_markdown(make_draft(), ORIGINAL, "voice", NOW)
     assert "Связанное" not in markdown
+
+
+def test_task_with_due_and_priority() -> None:
+    draft = make_draft(
+        tasks=[{"text": "Оплатить интернет", "due": "2026-11-06", "priority": "high"}]
+    )
+    markdown = build_markdown(draft, ORIGINAL, "voice", NOW)
+    assert "- [ ] Оплатить интернет 📅 2026-11-06 ⏫" in markdown
+
+
+def test_invalid_due_is_dropped() -> None:
+    draft = make_draft(
+        tasks=[{"text": "Позвонить", "due": "в пятницу", "priority": "none"}]
+    )
+    markdown = build_markdown(draft, ORIGINAL, "voice", NOW)
+    assert "- [ ] Позвонить" in markdown
+    assert "📅" not in markdown
+
+
+def test_plain_task_strings_are_still_accepted() -> None:
+    draft = make_draft(tasks=["Просто задача"])
+    assert draft.tasks[0].text == "Просто задача"
+    assert draft.tasks[0].due == ""

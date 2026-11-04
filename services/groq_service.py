@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from datetime import date
+from typing import Any, Sequence
 
 import httpx
 from pydantic import ValidationError
@@ -17,6 +18,16 @@ logger = logging.getLogger(__name__)
 
 API_URL = "https://api.groq.com/openai/v1"
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+
+WEEKDAYS = (
+    "понедельник",
+    "вторник",
+    "среда",
+    "четверг",
+    "пятница",
+    "суббота",
+    "воскресенье",
+)
 
 STT_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
 LLM_TIMEOUT = httpx.Timeout(60.0, connect=10.0)
@@ -82,13 +93,35 @@ class GroqService:
 
     # ── Структурирование ─────────────────────────────────────
 
-    async def structure_note(self, text: str, source: NoteSource) -> NoteDraft:
+    async def structure_note(
+        self,
+        text: str,
+        source: NoteSource,
+        *,
+        today: date | None = None,
+        known_tags: Sequence[str] = (),
+    ) -> NoteDraft:
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": SYSTEM_PROMPT}
+        ]
+
+        context: list[str] = []
+        if today is not None:
+            context.append(f"Сегодня {today:%Y-%m-%d}, {WEEKDAYS[today.weekday()]}.")
+        if known_tags:
+            context.append(
+                "Существующие теги базы (используй, если подходят): "
+                + ", ".join(known_tags)
+                + "."
+            )
+        if context:
+            messages.append({"role": "system", "content": "\n".join(context)})
+
+        messages.append({"role": "user", "content": text})
+
         payload: dict[str, Any] = {
             "model": self._llm_model,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": text},
-            ],
+            "messages": messages,
             "temperature": 0.3,
             "max_completion_tokens": 1200,
             "response_format": {

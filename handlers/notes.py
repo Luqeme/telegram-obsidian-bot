@@ -21,6 +21,7 @@ from services import (
     build_markdown,
     make_filename,
     normalize_tags,
+    wiki_link,
 )
 
 logger = logging.getLogger(__name__)
@@ -143,8 +144,21 @@ async def _process(
     original: str,
     source: str,
 ) -> None:
+    now = datetime.now(services.settings.tz)
+
+    known_tags: list[str] = []
     try:
-        draft = await services.groq.structure_note(text, source)  # type: ignore[arg-type]
+        known_tags = await services.index.top_tags(limit=30)
+    except GitHubError as exc:
+        logger.warning("Не удалось получить словарь тегов: %s", exc)
+
+    try:
+        draft = await services.groq.structure_note(
+            text,  # type: ignore[arg-type]
+            source,  # type: ignore[arg-type]
+            today=now.date(),
+            known_tags=known_tags,
+        )
     except GroqError as exc:
         logger.error("structure_note: %s", exc)
         await message.answer(exc.user_message)
@@ -154,21 +168,30 @@ async def _process(
         await message.answer("🤔 В сообщении нет содержания для заметки.")
         return
 
-    created = datetime.now(services.settings.tz)
+    created = now
 
     if draft.money_kind != "none" and draft.money_amount > 0:
         await _save_money(message, services, draft, original, created)
         return
 
     related: list[tuple[str, str]] = []
+    linked_summary = draft.summary
     try:
+        all_notes = await services.index.notes()
         for note in await services.index.similar(draft.tags, limit=2):
             related.append((note.stem, note.title))
+        linked_summary = wiki_link(
+            draft.summary, [(note.stem, note.title) for note in all_notes]
+        )
     except GitHubError as exc:
         logger.warning("Не удалось найти связанные заметки: %s", exc)
 
     content = build_markdown(
-        draft, original, source, created, related=related  # type: ignore[arg-type]
+        draft.model_copy(update={"summary": linked_summary}),
+        original,
+        source,  # type: ignore[arg-type]
+        created,
+        related=related,
     )
     filename = make_filename(
         draft.title,
@@ -264,7 +287,10 @@ def _render_card(path: str, draft: NoteDraft) -> str:
     if draft.tasks:
         lines.extend(["", "📋 <b>Задачи</b>"])
         for task in draft.tasks[:MAX_CARD_TASKS]:
-            lines.append(f"• {html.escape(_shorten(task, TASK_LIMIT))}")
+            line = html.escape(_shorten(task.text, TASK_LIMIT))
+            if task.due:
+                line += f" · до {task.due[8:10]}.{task.due[5:7]}"
+            lines.append(f"• {line}")
         hidden = len(draft.tasks) - MAX_CARD_TASKS
         if hidden > 0:
             lines.append(f"…и ещё {hidden}")

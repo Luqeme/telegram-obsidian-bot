@@ -17,6 +17,7 @@ NoteSource = Literal["voice", "text"]
 
 MAX_SLUG_LEN = 40
 MAX_TAGS = 4
+PRIORITY_MARKS = {"high": "⏫", "medium": "🔼", "low": "🔽"}
 
 _ORIGIN_ICON: dict[str, str] = {"voice": "🎙", "text": "📝"}
 
@@ -35,6 +36,44 @@ _YAML_RESERVED = frozenset(
 _SAFE_YAML_RE = re.compile(r"[a-zA-Zа-яА-ЯёЁ0-9_\-]+")
 
 
+class TaskItem(BaseModel):
+    """Задача в формате плагина Tasks: текст + срок + приоритет."""
+
+    text: str
+    due: str = ""
+    priority: Literal["none", "low", "medium", "high"] = "none"
+
+    @field_validator("text")
+    @classmethod
+    def _clean_text(cls, value: str) -> str:
+        value = " ".join(value.split()).strip()
+        if not value:
+            raise ValueError("пустая задача")
+        return value
+
+    @field_validator("due")
+    @classmethod
+    def _check_due(cls, value: str) -> str:
+        value = (value or "").strip()
+        if not value:
+            return ""
+        try:
+            datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            return ""
+        return value
+
+    @field_validator("priority", mode="before")
+    @classmethod
+    def _normalize_priority(cls, value: object) -> object:
+        if isinstance(value, str):
+            value = value.strip().lower()
+            if value in {"high", "medium", "low", "none"}:
+                return value
+            return "none"
+        return value
+
+
 class NoteDraft(BaseModel):
     """То, что вернула LLM. Ни одного поля, которое придумывает код."""
 
@@ -43,11 +82,20 @@ class NoteDraft(BaseModel):
     category: Category
     tags: list[str] = Field(default_factory=list)
     summary: str = ""
-    tasks: list[str] = Field(default_factory=list)
+    tasks: list[TaskItem] = Field(default_factory=list)
 
     money_kind: Literal["none", "expense", "income"] = "none"
     money_amount: float = 0
     money_category: str = ""
+
+    @field_validator("tasks", mode="before")
+    @classmethod
+    def _tasks_from_strings(cls, value: object) -> object:
+        if isinstance(value, list):
+            return [
+                {"text": item} if isinstance(item, str) else item for item in value
+            ]
+        return value
 
     @field_validator("title")
     @classmethod
@@ -72,10 +120,28 @@ class NoteDraft(BaseModel):
     def _clean_summary(cls, value: str) -> str:
         return " ".join(value.split()).strip()
 
-    @field_validator("tasks")
-    @classmethod
-    def _clean_tasks(cls, value: list[str]) -> list[str]:
-        return [task.strip() for task in value if task and task.strip()]
+
+# ── Ссылки ───────────────────────────────────────────────────
+
+
+def wiki_link(text: str, targets: Sequence[tuple[str, str]]) -> str:
+    """Оборачивает упоминания существующих заметок в [[файл|подпись]].
+
+    Ссылки строятся только по реальным заголовкам из индекса — выдуманных
+    узлов в графе не появляется.
+    """
+    if not text or not targets:
+        return text
+
+    ordered = sorted(targets, key=lambda pair: len(pair[1]), reverse=True)
+    for stem, title in ordered:
+        if len(title) < 4 or f"[[{stem}|" in text:
+            continue
+        pattern = re.compile(re.escape(title), re.IGNORECASE)
+        if not pattern.search(text):
+            continue
+        text = pattern.sub(f"[[{stem}|{title}]]", text, count=1)
+    return text
 
 
 # ── Slug ─────────────────────────────────────────────────────
@@ -216,7 +282,14 @@ def build_markdown(
 
     if draft.tasks:
         parts.append("## 📋 Задачи")
-        parts.extend(f"- [ ] {task}" for task in draft.tasks)
+        for task in draft.tasks:
+            line = f"- [ ] {task.text}"
+            if task.due:
+                line += f" 📅 {task.due}"
+            mark = PRIORITY_MARKS.get(task.priority, "")
+            if mark:
+                line += f" {mark}"
+            parts.append(line)
         parts.append("")
 
     if related:
