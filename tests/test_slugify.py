@@ -58,7 +58,13 @@ def test_cyrillic_mode_truncates() -> None:
 def test_cyrillic_filename() -> None:
     moment = datetime(2026, 11, 4, 1, 37, 0, tzinfo=TZ)
     name = make_filename("Заехать купить молоко", moment, transliterate=False)
-    assert name == "2026-11-04_01-37-00_заехать-купить-молоко.md"
+    assert name == "2026-11-04 Заехать купить молоко.md"
+
+
+def test_human_name_strips_forbidden_chars() -> None:
+    moment = datetime(2026, 11, 4, 1, 37, 0, tzinfo=TZ)
+    name = make_filename('Планы: что делать? "срочно"', moment, transliterate=False)
+    assert name == "2026-11-04 Планы что делать срочно.md"
 
 
 def test_no_leading_dash_from_punctuation() -> None:
@@ -68,6 +74,4 @@ def test_no_leading_dash_from_punctuation() -> None:
 def test_make_filename_uses_local_time() -> None:
     moment = datetime(2026, 11, 3, 14, 30, 5, tzinfo=TZ)
     name = make_filename("Тестовая заметка", moment)
-    assert name.startswith("2026-11-03_14-30-05_")
-    assert name.endswith(".md")
-    assert name == "2026-11-03_14-30-05_testovaya-zametka.md"
+    assert name == "2026-11-03 testovaya-zametka.md"

@@ -105,6 +105,16 @@ def slugify(
     return slug or "note"
 
 
+_BAD_FILENAME_RE = re.compile(r'[\\/:*?"<>|]')
+
+
+def human_name(title: str, max_len: int = MAX_SLUG_LEN) -> str:
+    """Заголовок как есть, без служебных символов файловой системы."""
+    name = _BAD_FILENAME_RE.sub("", title)
+    name = " ".join(name.split()).strip(" .")
+    return name[:max_len].strip(" .") or "заметка"
+
+
 def make_filename(
     title: str,
     moment: datetime,
@@ -112,9 +122,13 @@ def make_filename(
     *,
     transliterate: bool = True,
 ) -> str:
-    """YYYY-MM-DD_HH-mm-ss_{slug}.md, время — в таймзоне пользователя."""
-    slug = slugify(title, max_len, transliterate=transliterate)
-    return f"{moment:%Y-%m-%d_%H-%M-%S}_{slug}.md"
+    """YYYY-MM-DD Заголовок.md — дата для порядка, заголовок для чтения."""
+    name = (
+        slugify(title, max_len, transliterate=True)
+        if transliterate
+        else human_name(title, max_len)
+    )
+    return f"{moment:%Y-%m-%d} {name}.md"
 
 
 # ── Теги ─────────────────────────────────────────────────────
