@@ -1,6 +1,6 @@
-# 🧠 База знаний
-
 `BUTTON[git-pull, git-sync]`
+
+# 🧠 База знаний
 
 ```meta-bind-button
 id: git-pull
