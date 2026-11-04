@@ -1,8 +1,3 @@
----
-cssclasses:
-  - dashboard
----
-
 # 🧠 База знаний
 
 ```meta-bind-button
