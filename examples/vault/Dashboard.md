@@ -25,14 +25,23 @@ dv.paragraph(
 
 ## 📥 Инбокс
 
-```dataview
-TABLE WITHOUT ID
-  link(file.path, default(title, file.name)) AS "Заметка",
-  category AS "Категория",
-  (date(today) - created).days AS "Дней"
-FROM ""
-WHERE contains(file.folder, "00_Inbox")
-SORT created ASC
+```dataviewjs
+const today = dv.date("today").startOf("day")
+const pages = dv
+  .pages()
+  .where((p) => String(p.file.folder).includes("00_Inbox"))
+  .sort((p) => p.created, "asc")
+
+const rows = pages.map((p) => {
+  const created = p.created
+  let days = ""
+  if (created && typeof created.toFormat === "function") {
+    days = Math.round(today.diff(created.startOf("day"), "days").days)
+  }
+  return [dv.fileLink(p.file.path, false, p.title ?? p.file.name), p.category ?? "", days]
+})
+
+dv.table(["Заметка", "Категория", "Дней"], rows)
 ```
 
 ---
