@@ -122,13 +122,13 @@ def make_filename(
     *,
     transliterate: bool = True,
 ) -> str:
-    """YYYY-MM-DD Заголовок.md — дата для порядка, заголовок для чтения."""
+    """Заголовок YYYY-MM-DD.md — заголовок для поиска, дата для порядка."""
     name = (
         slugify(title, max_len, transliterate=True)
         if transliterate
         else human_name(title, max_len)
     )
-    return f"{moment:%Y-%m-%d} {name}.md"
+    return f"{name} {moment:%Y-%m-%d}.md"
 
 
 # ── Теги ─────────────────────────────────────────────────────
