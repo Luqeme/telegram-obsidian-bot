@@ -45,6 +45,10 @@ class NoteDraft(BaseModel):
     summary: str = ""
     tasks: list[str] = Field(default_factory=list)
 
+    money_kind: Literal["none", "expense", "income"] = "none"
+    money_amount: float = 0
+    money_category: str = ""
+
     @field_validator("title")
     @classmethod
     def _clean_title(cls, value: str) -> str:

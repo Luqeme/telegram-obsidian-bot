@@ -32,12 +32,30 @@ SYSTEM_PROMPT = """Ты — персональный секретарь и ар�
    Формулируй как действие: «Оплатить интернет в четверг», «Изучить PyJWT».
    НЕ придумывай задачи. Если задач нет — верни пустой массив.
 7. Не добавляй ничего от себя: ни идей, ни задач, ни выводов, которых не было в тексте.
+8. Деньги. Если человек сообщает о СОВЕРШЁННОЙ трате или полученном доходе:
+   money_kind = "expense" для траты, "income" для дохода;
+   money_amount — только число, без валюты, пробелов и слов («540», «5000.50»);
+   money_category — короткая категория по-русски: Еда, Транспорт, Дом, Здоровье,
+   Развлечения, Одежда, Связь, Зарплата, Подарок, Прочее.
+   Если речь о планах («надо купить», «потрачу», «запланировал») — это НЕ транзакция:
+   money_kind = "none", money_amount = 0, money_category = "".
+   В любом другом случае — тоже money_kind = "none".
 """
 
 NOTE_DRAFT_SCHEMA: dict = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["is_meaningful", "title", "category", "tags", "summary", "tasks"],
+    "required": [
+        "is_meaningful",
+        "title",
+        "category",
+        "tags",
+        "summary",
+        "tasks",
+        "money_kind",
+        "money_amount",
+        "money_category",
+    ],
     "properties": {
         "is_meaningful": {"type": "boolean"},
         "title": {"type": "string"},
@@ -45,5 +63,8 @@ NOTE_DRAFT_SCHEMA: dict = {
         "tags": {"type": "array", "items": {"type": "string"}},
         "summary": {"type": "string"},
         "tasks": {"type": "array", "items": {"type": "string"}},
+        "money_kind": {"type": "string", "enum": ["none", "expense", "income"]},
+        "money_amount": {"type": "number"},
+        "money_category": {"type": "string"},
     },
 }

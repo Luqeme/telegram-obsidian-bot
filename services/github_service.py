@@ -78,6 +78,74 @@ class GitHubService:
             "❌ Не удалось сохранить: имя файла занято 5 раз подряд.",
         )
 
+    async def append_line(
+        self,
+        path: str,
+        line: str,
+        commit_message: str,
+        *,
+        header: str | None = None,
+    ) -> None:
+        """Дописывает строку в файл, создавая его при отсутствии."""
+        url = f"{API_URL}/repos/{self._repo}/contents/{quote(path, safe='/')}"
+
+        for attempt in range(2):
+            content = ""
+            sha: str | None = None
+
+            try:
+                response = await self._client.get(
+                    url,
+                    headers=self._headers,
+                    params={"ref": self._branch},
+                    timeout=FILE_TIMEOUT,
+                )
+            except httpx.HTTPError as exc:
+                raise GitHubError(
+                    f"GitHub недоступен: {exc!r}",
+                    "❌ GitHub временно недоступен, попробуй ещё раз.",
+                ) from exc
+
+            if response.status_code == 200:
+                data = response.json()
+                content = base64.b64decode(data["content"]).decode("utf-8")
+                sha = data["sha"]
+            elif response.status_code == 404:
+                content = f"{header}\n" if header else ""
+            else:
+                logger.error("GitHub GET %s: HTTP %s", path, response.status_code)
+                raise GitHubError(
+                    f"GitHub GET {path}: {response.status_code}",
+                    "❌ Не удалось прочитать файл в GitHub.",
+                )
+
+            if content and not content.endswith("\n"):
+                content += "\n"
+            content += line + "\n"
+
+            payload: dict = {
+                "message": commit_message,
+                "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+                "branch": self._branch,
+            }
+            if sha:
+                payload["sha"] = sha
+
+            put = await self._client.put(
+                url, json=payload, headers=self._headers, timeout=FILE_TIMEOUT
+            )
+            if put.status_code in (200, 201):
+                return
+            if put.status_code in (409, 422) and attempt == 0:
+                logger.warning("GitHub: конфликт при дописывании, повторяю")
+                continue
+
+            logger.error("GitHub PUT %s: HTTP %s", path, put.status_code)
+            raise GitHubError(
+                f"GitHub PUT {path}: {put.status_code}",
+                "❌ Не удалось записать в GitHub.",
+            )
+
     async def push_markdown_note(
         self, path: str, content: str, commit_message: str
     ) -> str:

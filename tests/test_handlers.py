@@ -103,3 +103,28 @@ def test_card_without_tasks_has_no_section() -> None:
 
     card = _render_card("00_Inbox/x.md", _draft_with_tasks([]))
     assert "📋" not in card
+
+
+def test_csv_row_quotes_commas() -> None:
+    from handlers.notes import _csv_row
+
+    assert (
+        _csv_row(["2026-11-04", "expense", "540", "Еда", "обед, кофе"])
+        == '2026-11-04,expense,540,Еда,"обед, кофе"'
+    )
+
+
+def test_format_amount() -> None:
+    from handlers.notes import _format_amount
+
+    assert _format_amount(540) == "540"
+    assert _format_amount(540.5) == "540.50"
+
+
+def test_money_fields_default_to_none() -> None:
+    from services.note_builder import NoteDraft
+
+    draft = NoteDraft(is_meaningful=True, title="Тест", category="Мысль")
+    assert draft.money_kind == "none"
+    assert draft.money_amount == 0
+    assert draft.money_category == ""

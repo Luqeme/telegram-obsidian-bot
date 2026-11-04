@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import csv
 import html
+import io
 import logging
 from datetime import datetime
 
@@ -32,6 +34,23 @@ CARD_LIMIT = 4000
 SUMMARY_LIMIT = 600
 TASK_LIMIT = 200
 MAX_CARD_TASKS = 15
+
+MONEY_PATH = "30_Money/transactions.csv"
+MONEY_HEADER = "date,kind,amount,category,note"
+
+
+def _csv_row(values: list[str]) -> str:
+    buffer = io.StringIO()
+    csv.writer(buffer).writerow(values)
+    return buffer.getvalue().rstrip("\r\n")
+
+
+def _clean_cell(value: str, limit: int = 120) -> str:
+    return " ".join(value.replace("\n", " ").split())[:limit]
+
+
+def _format_amount(amount: float) -> str:
+    return f"{amount:.0f}" if amount == int(amount) else f"{amount:.2f}"
 
 
 def check_voice_limits(size: int, duration: int, limit_mb: int) -> str | None:
@@ -136,6 +155,11 @@ async def _process(
         return
 
     created = datetime.now(services.settings.tz)
+
+    if draft.money_kind != "none" and draft.money_amount > 0:
+        await _save_money(message, services, draft, original, created)
+        return
+
     content = build_markdown(draft, original, source, created)  # type: ignore[arg-type]
     filename = make_filename(
         draft.title,
@@ -164,6 +188,49 @@ async def _process(
     )
     await message.answer(
         _render_card(path, draft),
+        parse_mode="HTML",
+    )
+
+
+async def _save_money(
+    message: Message,
+    services: Services,
+    draft: NoteDraft,
+    original: str,
+    created: datetime,
+) -> None:
+    category = _clean_cell(draft.money_category, limit=30) or "Прочее"
+    amount = _format_amount(round(float(draft.money_amount), 2))
+    row = _csv_row(
+        [
+            created.strftime("%Y-%m-%d"),
+            draft.money_kind,
+            amount,
+            category,
+            _clean_cell(original),
+        ]
+    )
+
+    try:
+        await services.github.append_line(
+            MONEY_PATH,
+            row,
+            f"Money: {draft.money_kind} {amount}",
+            header=MONEY_HEADER,
+        )
+    except GitHubError as exc:
+        logger.error("append money: %s", exc)
+        await message.answer(
+            f"{exc.user_message}\n\nЗапись не потеряна:\n{original[:3000]}"
+        )
+        return
+
+    kind = "Расход" if draft.money_kind == "expense" else "Доход"
+    sign = "−" if draft.money_kind == "expense" else "+"
+    logger.info("money_saved kind=%s amount=%s category=%s", draft.money_kind, amount, category)
+    await message.answer(
+        f"💰 <b>{kind} записан</b>\n\n"
+        f"{sign}{amount} ₽ · {html.escape(category)}",
         parse_mode="HTML",
     )
 
