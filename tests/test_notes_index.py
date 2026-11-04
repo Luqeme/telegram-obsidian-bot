@@ -95,3 +95,33 @@ def test_seconds_until_is_within_a_day() -> None:
 
     delay = _seconds_until("00:00", ZoneInfo("Asia/Yekaterinburg"))
     assert 0 < delay <= 86400
+
+
+def test_search_understands_question_phrasing() -> None:
+    import asyncio
+
+    from services.notes_index import NotesIndex
+
+    async def run() -> list[str]:
+        index = NotesIndex(github=None)  # type: ignore[arg-type]
+        index._notes = [parse_note("10_Notes/Дашборд 2026-11-04.md", SAMPLE)]
+        index._loaded_at = asyncio.get_running_loop().time()
+        found = await index.search("что я писал про дашборд")
+        return [note.title for note in found]
+
+    titles = asyncio.run(run())
+    assert titles == ["Работа над внешним видом дашборда"]
+
+
+def test_search_ignores_stopwords_only() -> None:
+    import asyncio
+
+    from services.notes_index import NotesIndex
+
+    async def run() -> int:
+        index = NotesIndex(github=None)  # type: ignore[arg-type]
+        index._notes = [parse_note("10_Notes/Дашборд 2026-11-04.md", SAMPLE)]
+        index._loaded_at = asyncio.get_running_loop().time()
+        return len(await index.search("что я писал"))
+
+    assert asyncio.run(run()) == 0

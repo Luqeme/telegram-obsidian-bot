@@ -31,6 +31,20 @@ MAX_FILES = 500
 FETCH_CONCURRENCY = 6
 SKIP_NAMES = {"Dashboard.md", "README.md"}
 
+STOPWORDS = frozenset(
+    {
+        "что", "про", "как", "где", "когда", "почему", "зачем", "кто", "это",
+        "я", "мы", "мне", "меня", "мой", "мои", "моя", "был", "была", "были",
+        "было", "будет", "есть", "и", "или", "а", "но", "в", "во", "на", "по",
+        "с", "со", "у", "к", "от", "до", "за", "из", "о", "об", "для", "не",
+        "ни", "же", "ли", "то", "всё", "все", "писал", "писала", "говорил",
+        "сказал", "записал", "надиктовывал", "помню", "знаю", "там", "тут",
+        "этот", "эта", "эти", "ещё", "уже", "можно", "надо",
+    }
+)
+
+WORD_RE = re.compile(r"[0-9a-zа-яё]+")
+
 
 @dataclass(slots=True)
 class NoteInfo:
@@ -190,19 +204,34 @@ class NotesIndex:
     # ── Запросы ──────────────────────────────────────────────
 
     async def search(self, query: str, limit: int = 5) -> list[NoteInfo]:
-        needle = query.strip().casefold()
-        if not needle:
+        """Пословный поиск: «что я писал про дашборд» тоже находит заметки."""
+        phrase = query.strip().casefold()
+        tokens = [
+            token
+            for token in WORD_RE.findall(phrase)
+            if len(token) >= 3 and token not in STOPWORDS
+        ]
+        if not tokens and not phrase:
             return []
 
         scored: list[tuple[int, NoteInfo]] = []
         for note in await self.notes():
+            title = note.title.casefold()
+            text = note.text.casefold()
+            tags = [tag.casefold() for tag in note.tags]
+
             score = 0
-            if needle in note.title.casefold():
-                score += 3
-            if any(needle in tag.casefold() for tag in note.tags):
-                score += 2
-            if needle in note.text.casefold():
-                score += 1
+            for token in tokens:
+                if token in title:
+                    score += 3
+                if any(token in tag for tag in tags):
+                    score += 2
+                if token in text:
+                    score += 1
+
+            if phrase and (phrase in title or phrase in text):
+                score += 5
+
             if score:
                 scored.append((score, note))
 
