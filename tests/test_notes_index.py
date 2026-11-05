@@ -132,6 +132,18 @@ def test_reads_note_type() -> None:
     assert note.note_type == "project"
 
 
+def test_reads_project_metadata() -> None:
+    raw = (
+        '---\ntype: project\ntitle: "Shot Bot"\n'
+        'description: "Бот учёта уколов"\naliases:\n  - шот бот\n  - дневник уколов\n'
+        "---\n\n# Shot Bot\n"
+    )
+    note = parse_note("20_Projects/Shot Bot.md", raw)
+
+    assert note.aliases == ("шот бот", "дневник уколов")
+    assert note.description == "Бот учёта уколов"
+
+
 def test_index_skips_project_hubs() -> None:
     import asyncio
 

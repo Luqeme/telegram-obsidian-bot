@@ -89,9 +89,13 @@ class GroqService:
     # ── Распознавание речи ───────────────────────────────────
 
     async def transcribe_audio(
-        self, audio: bytes, filename: str = "voice.ogg"
+        self, audio: bytes, filename: str = "voice.ogg", *, hint: str = ""
     ) -> str:
-        """Отправляет аудио в Whisper. Возвращает расшифровку (может быть пустой)."""
+        """Отправляет аудио в Whisper. Возвращает расшифровку (может быть пустой).
+
+        hint — словарь терминов и названий проектов: Whisper заметно реже
+        теряет имена собственные, если они есть в prompt.
+        """
         files = {"file": (filename, audio, _mime_type(filename))}
         data = {
             "model": self._stt_model,
@@ -99,6 +103,8 @@ class GroqService:
             "response_format": "json",
             "temperature": "0",
         }
+        if hint:
+            data["prompt"] = f"Термины и названия: {hint}"
         response = await self._post_with_retry(
             f"{API_URL}/audio/transcriptions",
             what="Whisper",
@@ -127,6 +133,7 @@ class GroqService:
         *,
         today: date | None = None,
         known_tags: Sequence[str] = (),
+        known_projects: str = "",
     ) -> NoteDraft:
         messages: list[dict[str, str]] = [
             {"role": "system", "content": SYSTEM_PROMPT}
@@ -141,6 +148,8 @@ class GroqService:
                 + ", ".join(known_tags)
                 + "."
             )
+        if known_projects:
+            context.append(known_projects)
         if context:
             messages.append({"role": "system", "content": "\n".join(context)})
 

@@ -167,7 +167,10 @@ async def handle_voice(message: Message, bot: Bot, services: Services) -> None:
         return
 
     try:
-        text = await services.groq.transcribe_audio(buffer.read(), filename=filename)
+        hint, _ = await _index_context(services)
+        text = await services.groq.transcribe_audio(
+            buffer.read(), filename=filename, hint=hint
+        )
     except GroqError as exc:
         logger.error("transcribe_audio: %s", exc)
         await message.answer(exc.user_message)
@@ -184,6 +187,44 @@ async def handle_voice(message: Message, bot: Bot, services: Services) -> None:
     await _process(bot, message, services, text=text, original=text, source="voice")
 
 
+async def _index_context(services: Services) -> tuple[str, str]:
+    """(словарь для Whisper, описание проектов для LLM)."""
+    try:
+        hubs = await services.index.projects()
+        tags = await services.index.top_tags(limit=20)
+    except GitHubError as exc:
+        logger.warning("Не удалось получить контекст базы: %s", exc)
+        return "", ""
+
+    seen: set[str] = set()
+    words: list[str] = []
+    for word in [word for hub in hubs for word in (hub.title, *hub.aliases)] + tags:
+        key = word.casefold()
+        if word and key not in seen:
+            seen.add(key)
+            words.append(word)
+    hint = ", ".join(words)[:400]
+
+    parts: list[str] = []
+    for hub in hubs:
+        line = hub.title
+        if hub.aliases:
+            line += f" ({', '.join(hub.aliases)})"
+        if hub.description:
+            line += f" — {hub.description}"
+        parts.append(line)
+
+    context = ""
+    if parts:
+        context = (
+            "Проекты базы: "
+            + "; ".join(parts)
+            + ". Если текст явно про один из них, используй его точное название "
+            "в title и summary."
+        )
+    return hint, context
+
+
 async def _process(
     bot: Bot,
     message: Message,
@@ -196,17 +237,23 @@ async def _process(
     now = datetime.now(services.settings.tz)
 
     known_tags: list[str] = []
+    project_context = ""
     try:
         known_tags = await services.index.top_tags(limit=30)
     except GitHubError as exc:
         logger.warning("Не удалось получить словарь тегов: %s", exc)
 
     try:
+        _, project_context = await _index_context(services)
+    except GitHubError as exc:
+        logger.warning("Не удалось получить проекты: %s", exc)
+    try:
         draft = await services.groq.structure_note(
             text,  # type: ignore[arg-type]
             source,  # type: ignore[arg-type]
             today=now.date(),
             known_tags=known_tags,
+            known_projects=project_context,
         )
     except GroqError as exc:
         logger.error("structure_note: %s", exc)

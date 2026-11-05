@@ -57,6 +57,8 @@ class NoteInfo:
     text: str
     tasks: tuple[str, ...]
     note_type: str = ""
+    aliases: tuple[str, ...] = ()
+    description: str = ""
 
     @property
     def stem(self) -> str:
@@ -142,6 +144,11 @@ def parse_note(path: str, raw: str) -> NoteInfo:
 
     tasks = tuple(match.strip() for match in TASK_RE.findall(body))
 
+    aliases_raw = meta.get("aliases") or []
+    if isinstance(aliases_raw, str):
+        aliases_raw = [aliases_raw]
+    aliases = tuple(str(item).strip() for item in aliases_raw if str(item).strip())
+
     return NoteInfo(
         path=path,
         title=str(title),
@@ -151,6 +158,8 @@ def parse_note(path: str, raw: str) -> NoteInfo:
         text=body,
         tasks=tasks,
         note_type=str(meta.get("type") or ""),
+        aliases=aliases,
+        description=str(meta.get("description") or "").strip(),
     )
 
 
