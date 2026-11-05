@@ -48,6 +48,9 @@ SYSTEM_PROMPT = """Ты — персональный секретарь и ар�
    Если речь о планах («надо купить», «потрачу», «запланировал») — это НЕ транзакция:
    money_kind = "none", money_amount = 0, money_category = "".
    В любом другом случае — тоже money_kind = "none".
+9. project — точное название проекта из списка в контексте, если текст явно относится
+   к нему (название проекта или его алиас прозвучали). Иначе пустая строка.
+   Не придумывай проект, которого нет в списке, и не угадывай по общим словам.
 """
 
 NOTE_DRAFT_SCHEMA: dict = {
@@ -63,6 +66,7 @@ NOTE_DRAFT_SCHEMA: dict = {
         "money_kind",
         "money_amount",
         "money_category",
+        "project",
     ],
     "properties": {
         "is_meaningful": {"type": "boolean"},
@@ -89,5 +93,6 @@ NOTE_DRAFT_SCHEMA: dict = {
         "money_kind": {"type": "string", "enum": ["none", "expense", "income"]},
         "money_amount": {"type": "number"},
         "money_category": {"type": "string"},
+        "project": {"type": "string"},
     },
 }

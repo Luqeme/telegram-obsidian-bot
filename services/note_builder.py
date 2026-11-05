@@ -87,6 +87,7 @@ class NoteDraft(BaseModel):
     money_kind: Literal["none", "expense", "income"] = "none"
     money_amount: float = 0
     money_category: str = ""
+    project: str = ""
 
     @field_validator("tasks", mode="before")
     @classmethod

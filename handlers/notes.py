@@ -28,6 +28,7 @@ from services import (
     make_filename,
     normalize_tags,
     wiki_link,
+    with_up_link,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ MAX_CARD_TASKS = 15
 
 MONEY_PATH = "30_Money/transactions.csv"
 MONEY_HEADER = "date,kind,amount,category,note"
-MAX_PROJECT_BUTTONS = 6
+PROJECT_PAGE_SIZE = 6
 
 # callback_data ограничена 64 байтами, а путь с кириллицей в неё не влезает,
 # поэтому в кнопке лежит короткий хеш, а путь — в памяти процесса.
@@ -289,6 +290,17 @@ async def _process(
         created,
         related=related,
     )
+
+    project_title = ""
+    if draft.project:
+        try:
+            hubs = await services.index.projects()
+        except GitHubError as exc:
+            logger.warning("Не удалось проверить проект: %s", exc)
+            hubs = []
+        project_title = _match_project(draft.project, hubs)
+        if project_title:
+            content = with_up_link(content, project_title)
     filename = make_filename(
         draft.title,
         created,
@@ -317,9 +329,9 @@ async def _process(
     services.index.invalidate()
 
     markup = await _project_keyboard(services, path)
-    card = _render_card(path, draft)
+    card = _render_card(path, draft, project_title)
     if markup is not None:
-        card += "\n\n🚀 <b>Проект?</b> Выбери кнопкой ниже."
+        card += "\n\n🚀 <b>Проект?</b> Выбери или поменяй кнопкой ниже."
     await message.answer(card, parse_mode="HTML", reply_markup=markup)
 
 
@@ -329,10 +341,26 @@ def _remember(mapping: dict[str, str], key: str, value: str, limit: int = 1000) 
         mapping.pop(next(iter(mapping)))
 
 
+def _normalize_project(value: str) -> str:
+    return " ".join(value.strip().casefold().replace("-", " ").split())
+
+
+def _match_project(value: str, hubs: list) -> str:
+    """Возвращает точное название хаба, если LLM назвала его или алиас."""
+    wanted = _normalize_project(value)
+    if not wanted:
+        return ""
+    for hub in hubs:
+        for name in (hub.title, *hub.aliases):
+            if _normalize_project(name) == wanted:
+                return hub.title
+    return ""
+
+
 async def _project_keyboard(
-    services: Services, path: str
+    services: Services, path: str, page: int = 0
 ) -> InlineKeyboardMarkup | None:
-    """Кнопки существующих проектов. None, если хабов ещё нет."""
+    """Кнопки проектов с постраничной навигацией. None, если хабов нет."""
     try:
         hubs = await services.index.projects()
     except GitHubError as exc:
@@ -345,8 +373,12 @@ async def _project_keyboard(
     token = hashlib.sha1(path.encode("utf-8")).hexdigest()[:12]
     _remember(_PROJECT_NOTES, token, path)
 
+    pages = (len(hubs) + PROJECT_PAGE_SIZE - 1) // PROJECT_PAGE_SIZE
+    page = max(0, min(page, pages - 1))
+    chunk = hubs[page * PROJECT_PAGE_SIZE : (page + 1) * PROJECT_PAGE_SIZE]
+
     buttons: list[InlineKeyboardButton] = []
-    for hub in hubs[:MAX_PROJECT_BUTTONS]:
+    for hub in chunk:
         key = hashlib.sha1(hub.path.encode("utf-8")).hexdigest()[:8]
         _remember(_PROJECT_HUBS, key, hub.title)
         buttons.append(
@@ -362,6 +394,23 @@ async def _project_keyboard(
         )
     )
     rows = [buttons[index : index + 2] for index in range(0, len(buttons), 2)]
+
+    if pages > 1:
+        nav: list[InlineKeyboardButton] = []
+        if page > 0:
+            nav.append(
+                InlineKeyboardButton(
+                    text="◀", callback_data=f"proj:{token}:page{page - 1}"
+                )
+            )
+        if page < pages - 1:
+            nav.append(
+                InlineKeyboardButton(
+                    text="Ещё ▶", callback_data=f"proj:{token}:page{page + 1}"
+                )
+            )
+        rows.append(nav)
+
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -373,7 +422,7 @@ async def on_project_choice(callback: CallbackQuery, services: Services) -> None
         return
 
     _, token, choice = parts
-    path = _PROJECT_NOTES.pop(token, None)
+    path = _PROJECT_NOTES.get(token)
     if path is None:
         await callback.answer(
             "Кнопка устарела — пришли заметку ещё раз.", show_alert=True
@@ -381,6 +430,23 @@ async def on_project_choice(callback: CallbackQuery, services: Services) -> None
         return
 
     message = callback.message
+
+    if choice.startswith("page"):
+        try:
+            page = int(choice[4:])
+        except ValueError:
+            page = 0
+        markup = await _project_keyboard(services, path, page)
+        if isinstance(message, Message) and markup is not None:
+            try:
+                await message.edit_reply_markup(reply_markup=markup)
+            except TelegramAPIError:
+                pass
+        await callback.answer()
+        return
+
+    _PROJECT_NOTES.pop(token, None)
+
     if choice == "none":
         await callback.answer("Без проекта")
         if isinstance(message, Message):
@@ -468,12 +534,15 @@ async def _save_money(
     )
 
 
-def _render_card(path: str, draft: NoteDraft) -> str:
+def _render_card(path: str, draft: NoteDraft, project: str = "") -> str:
     lines = [
         "✅ <b>Заметка сохранена в Obsidian</b>",
         "",
         f"📁 <code>{html.escape(path)}</code>",
     ]
+
+    if project:
+        lines.extend(["", f"🚀 Проект: <b>{html.escape(project)}</b>"])
 
     tags = normalize_tags(draft.tags)
     if tags:

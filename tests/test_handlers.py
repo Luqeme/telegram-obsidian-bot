@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from handlers.notes import MAX_AUDIO_SECONDS, check_voice_limits
+from types import SimpleNamespace
+
+from handlers.notes import MAX_AUDIO_SECONDS, _match_project, check_voice_limits
 
 LIMIT_MB = 20
 
@@ -36,6 +38,20 @@ def test_too_long_is_rejected() -> None:
     )
     assert reason is not None
     assert "мин" in reason
+
+
+def test_project_matches_title_or_alias() -> None:
+    hubs = [
+        SimpleNamespace(title="Shot Bot", aliases=("шот бот", "дневник уколов")),
+        SimpleNamespace(title="Бот", aliases=()),
+    ]
+
+    assert _match_project("Shot Bot", hubs) == "Shot Bot"
+    assert _match_project("shot-bot", hubs) == "Shot Bot"
+    assert _match_project("дневник уколов", hubs) == "Shot Bot"
+    assert _match_project("бот", hubs) == "Бот"
+    assert _match_project("несуществующий", hubs) == ""
+    assert _match_project("", hubs) == ""
 
 
 def test_card_has_no_github_link() -> None:

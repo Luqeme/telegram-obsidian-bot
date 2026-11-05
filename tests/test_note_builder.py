@@ -152,6 +152,15 @@ def test_no_tasks_key_when_llm_says_not_meaningful() -> None:
     assert draft.is_meaningful is False
 
 
+def test_draft_carries_project_and_schema_requires_it() -> None:
+    from prompts import NOTE_DRAFT_SCHEMA
+
+    assert make_draft(project="Shot Bot").project == "Shot Bot"
+    assert make_draft().project == ""
+    assert "project" in NOTE_DRAFT_SCHEMA["required"]
+    assert NOTE_DRAFT_SCHEMA["properties"]["project"] == {"type": "string"}
+
+
 def test_related_section_rendered() -> None:
     markdown = build_markdown(
         make_draft(),
