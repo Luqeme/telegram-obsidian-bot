@@ -29,7 +29,7 @@ PRIORITY_MARKS = ("⏫", "🔼", "🔽")
 DEFAULT_TTL = 600
 MAX_FILES = 500
 FETCH_CONCURRENCY = 6
-SKIP_NAMES = {"Dashboard.md", "README.md"}
+SKIP_NAMES = {"Dashboard.md", "Карта.md", "README.md"}
 
 STOPWORDS = frozenset(
     {
