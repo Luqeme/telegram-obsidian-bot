@@ -30,6 +30,7 @@ DEFAULT_TTL = 600
 MAX_FILES = 500
 FETCH_CONCURRENCY = 6
 SKIP_NAMES = {"Dashboard.md", "Карта.md", "README.md"}
+SKIP_TYPES = {"project", "project-template"}
 
 STOPWORDS = frozenset(
     {
@@ -208,7 +209,7 @@ class NotesIndex:
                 *(load_one(path, sha) for path, sha in to_fetch)
             )
             for path, sha, note in loaded:
-                if note is not None and note.note_type != "project":
+                if note is not None and note.note_type not in SKIP_TYPES:
                     known[path] = note
                     self._cache[path] = (sha, note)
 

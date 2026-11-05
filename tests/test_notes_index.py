@@ -139,11 +139,17 @@ def test_index_skips_project_hubs() -> None:
 
     class FakeGitHub:
         async def list_markdown_blobs(self) -> list[tuple[str, str]]:
-            return [("20_Projects/Бот.md", "hub"), ("10_Notes/Note.md", "note")]
+            return [
+                ("20_Projects/Бот.md", "hub"),
+                ("99_Templates/Проект.md", "template"),
+                ("10_Notes/Note.md", "note"),
+            ]
 
         async def get_text(self, path: str) -> str:
             if path.endswith("Бот.md"):
                 return '---\ntype: project\ntitle: "Бот"\n---\n\n# Бот\n'
+            if path.endswith("Проект.md"):
+                return '---\ntype: project-template\ntitle: "Шаблон"\n---\n\n# Шаблон\n'
             return SAMPLE
 
     async def run() -> list[str]:
