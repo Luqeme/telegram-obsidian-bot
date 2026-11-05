@@ -304,6 +304,10 @@ class NotesIndex:
         await self.notes()
         return self._projects
 
+    async def areas(self) -> list[NoteInfo]:
+        """Бытовые области (type: area) — сюда бот дописывает задачи."""
+        return [note for note in await self.notes() if note.note_type == "area"]
+
     async def top_tags(self, limit: int = 30) -> list[str]:
         """Самые частые теги базы — чтобы модель не плодила синонимы."""
         counts: dict[str, int] = {}

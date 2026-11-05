@@ -24,7 +24,9 @@ from services import (
     GroqError,
     NoteDraft,
     Services,
+    TaskItem,
     build_markdown,
+    format_task,
     make_filename,
     normalize_tags,
     wiki_link,
@@ -192,14 +194,16 @@ async def _index_context(services: Services) -> tuple[str, str]:
     """(словарь для Whisper, описание проектов для LLM)."""
     try:
         hubs = await services.index.projects()
+        areas = await services.index.areas()
         tags = await services.index.top_tags(limit=20)
     except GitHubError as exc:
         logger.warning("Не удалось получить контекст базы: %s", exc)
         return "", ""
 
+    targets = [*hubs, *areas]
     seen: set[str] = set()
     words: list[str] = []
-    for word in [word for hub in hubs for word in (hub.title, *hub.aliases)] + tags:
+    for word in [word for hub in targets for word in (hub.title, *hub.aliases)] + tags:
         key = word.casefold()
         if word and key not in seen:
             seen.add(key)
@@ -222,6 +226,22 @@ async def _index_context(services: Services) -> tuple[str, str]:
             + "; ".join(parts)
             + ". Если текст явно про один из них, используй его точное название "
             "в title и summary."
+        )
+
+    if areas:
+        area_parts: list[str] = []
+        for area in areas:
+            line = area.title
+            if area.aliases:
+                line += f" ({', '.join(area.aliases)})"
+            if area.description:
+                line += f" — {area.description}"
+            area_parts.append(line)
+        context += (
+            "\nБытовые области: "
+            + "; ".join(area_parts)
+            + ". Если текст — бытовое дело (купить продукты, заехать в аптеку, "
+            "забрать посылку), укажи точное название области в поле project."
         )
     return hint, context
 
@@ -271,6 +291,18 @@ async def _process(
         await _save_money(message, services, draft, original, created)
         return
 
+    target = None
+    if draft.project:
+        try:
+            targets = [*await services.index.projects(), *await services.index.areas()]
+        except GitHubError as exc:
+            logger.warning("Не удалось проверить проект: %s", exc)
+            targets = []
+        target = _match_target(draft.project, targets)
+        if target is not None and target.note_type == "area":
+            await _save_area_tasks(message, services, draft, target, original)
+            return
+
     related: list[tuple[str, str]] = []
     linked_summary = draft.summary
     try:
@@ -290,17 +322,8 @@ async def _process(
         created,
         related=related,
     )
-
-    project_title = ""
-    if draft.project:
-        try:
-            hubs = await services.index.projects()
-        except GitHubError as exc:
-            logger.warning("Не удалось проверить проект: %s", exc)
-            hubs = []
-        project_title = _match_project(draft.project, hubs)
-        if project_title:
-            content = with_up_link(content, project_title)
+    if target is not None:
+        content = with_up_link(content, target.title)
     filename = make_filename(
         draft.title,
         created,
@@ -329,7 +352,7 @@ async def _process(
     services.index.invalidate()
 
     markup = await _project_keyboard(services, path)
-    card = _render_card(path, draft, project_title)
+    card = _render_card(path, draft, target.title if target is not None else "")
     if markup is not None:
         card += "\n\n🚀 <b>Проект?</b> Выбери или поменяй кнопкой ниже."
     await message.answer(card, parse_mode="HTML", reply_markup=markup)
@@ -345,16 +368,16 @@ def _normalize_project(value: str) -> str:
     return " ".join(value.strip().casefold().replace("-", " ").split())
 
 
-def _match_project(value: str, hubs: list) -> str:
-    """Возвращает точное название хаба, если LLM назвала его или алиас."""
+def _match_target(value: str, targets: list):
+    """Возвращает хаб проекта или области, если LLM назвала его/алиас."""
     wanted = _normalize_project(value)
     if not wanted:
-        return ""
-    for hub in hubs:
-        for name in (hub.title, *hub.aliases):
+        return None
+    for target in targets:
+        for name in (target.title, *target.aliases):
             if _normalize_project(name) == wanted:
-                return hub.title
-    return ""
+                return target
+    return None
 
 
 async def _project_keyboard(
@@ -489,6 +512,44 @@ async def on_project_choice(callback: CallbackQuery, services: Services) -> None
             f"🚀 Заметка добавлена в проект <b>{html.escape(project)}</b>",
             parse_mode="HTML",
         )
+
+
+async def _save_area_tasks(
+    message: Message,
+    services: Services,
+    draft: NoteDraft,
+    area,
+    original: str,
+) -> None:
+    """Бытовое дело: дописывает задачи в чек-лист области, а не создаёт заметку."""
+    tasks = draft.tasks or [TaskItem(text=draft.title)]
+    lines = [format_task(task) for task in tasks]
+
+    try:
+        await services.github.append_lines(
+            area.path, lines, f"Home: {draft.title}"
+        )
+    except GitHubError as exc:
+        logger.error("append area: %s", exc)
+        await message.answer(
+            f"{exc.user_message}\n\nЗадача не потеряна:\n{original[:3000]}"
+        )
+        return
+
+    services.index.invalidate()
+    logger.info("area_saved path=%s tasks=%s", area.path, len(lines))
+
+    bullets = []
+    for task in tasks[:10]:
+        line = f"• {html.escape(task.text)}"
+        if task.due:
+            line += f" · до {task.due[8:10]}.{task.due[5:7]}"
+        bullets.append(line)
+
+    await message.answer(
+        f"🏠 <b>{html.escape(area.title)}</b>\n\n" + "\n".join(bullets),
+        parse_mode="HTML",
+    )
 
 
 async def _save_money(

@@ -144,6 +144,40 @@ def test_reads_project_metadata() -> None:
     assert note.description == "Бот учёта уколов"
 
 
+def test_area_hub_is_indexed_and_returned() -> None:
+    import asyncio
+
+    from services.notes_index import NotesIndex
+
+    class FakeGitHub:
+        async def list_markdown_blobs(self) -> list[tuple[str, str]]:
+            return [("30_Дом/Бытовые дела.md", "area"), ("10_Notes/Note.md", "note")]
+
+        async def get_text(self, path: str) -> str:
+            if path.endswith("Бытовые дела.md"):
+                return (
+                    '---\ntype: area\ntitle: "Бытовые дела"\n---\n\n# Дом\n\n'
+                    "- [ ] Купить молоко\n- [x] Аптека\n"
+                )
+            return SAMPLE
+
+    async def run() -> tuple[list[str], list[str], list[str]]:
+        index = NotesIndex(FakeGitHub())  # type: ignore[arg-type]
+        notes = await index.notes()
+        areas = await index.areas()
+        tasks = await index.open_tasks()
+        return (
+            [note.title for note in notes],
+            [area.title for area in areas],
+            [task.text for task in tasks],
+        )
+
+    titles, areas, tasks = asyncio.run(run())
+    assert "Бытовые дела" in titles
+    assert areas == ["Бытовые дела"]
+    assert "Купить молоко" in tasks
+
+
 def test_index_skips_project_hubs() -> None:
     import asyncio
 

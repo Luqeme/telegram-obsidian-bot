@@ -283,6 +283,17 @@ def _quote_block(text: str) -> str:
     return "\n".join(f"> {line}" if line.strip() else ">" for line in lines)
 
 
+def format_task(task: TaskItem) -> str:
+    """Строка задачи в синтаксисе плагина Tasks."""
+    line = f"- [ ] {task.text}"
+    if task.due:
+        line += f" 📅 {task.due}"
+    mark = PRIORITY_MARKS.get(task.priority, "")
+    if mark:
+        line += f" {mark}"
+    return line
+
+
 def build_markdown(
     draft: NoteDraft,
     original_text: str,
@@ -303,13 +314,7 @@ def build_markdown(
     if draft.tasks:
         parts.append("## 📋 Задачи")
         for task in draft.tasks:
-            line = f"- [ ] {task.text}"
-            if task.due:
-                line += f" 📅 {task.due}"
-            mark = PRIORITY_MARKS.get(task.priority, "")
-            if mark:
-                line += f" {mark}"
-            parts.append(line)
+            parts.append(format_task(task))
         parts.append("")
 
     if related:

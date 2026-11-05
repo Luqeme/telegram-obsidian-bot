@@ -9,7 +9,9 @@ import yaml
 
 from services.note_builder import (
     NoteDraft,
+    TaskItem,
     build_markdown,
+    format_task,
     normalize_tags,
     sanitize_tag,
     with_up_link,
@@ -109,6 +111,11 @@ def test_tasks_section_omitted_when_empty() -> None:
     markdown = build_markdown(make_draft(tasks=[]), ORIGINAL, "voice", NOW)
     assert "📋 Задачи" not in markdown
     assert "Задач не обнаружено" not in markdown
+
+
+def test_format_task_with_due_and_priority() -> None:
+    task = TaskItem(text="Купить молоко", due="2026-11-06", priority="high")
+    assert format_task(task) == "- [ ] Купить молоко 📅 2026-11-06 ⏫"
 
 
 def test_original_text_is_verbatim() -> None:

@@ -260,6 +260,19 @@ class GitHubService:
         header: str | None = None,
     ) -> None:
         """Дописывает строку в файл, создавая его при отсутствии."""
+        await self.append_lines(path, [line], commit_message, header=header)
+
+    async def append_lines(
+        self,
+        path: str,
+        lines: list[str],
+        commit_message: str,
+        *,
+        header: str | None = None,
+    ) -> None:
+        """Дописывает несколько строк одним коммитом."""
+        if not lines:
+            return
         url = f"{API_URL}/repos/{self._repo}/contents/{quote(path, safe='/')}"
 
         for attempt in range(2):
@@ -294,7 +307,7 @@ class GitHubService:
 
             if content and not content.endswith("\n"):
                 content += "\n"
-            content += line + "\n"
+            content += "\n".join(lines) + "\n"
 
             payload: dict = {
                 "message": commit_message,
