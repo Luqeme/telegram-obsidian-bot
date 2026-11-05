@@ -55,6 +55,7 @@ class NoteInfo:
     created: datetime | None
     text: str
     tasks: tuple[str, ...]
+    note_type: str = ""
 
     @property
     def stem(self) -> str:
@@ -148,6 +149,7 @@ def parse_note(path: str, raw: str) -> NoteInfo:
         created=created,
         text=body,
         tasks=tasks,
+        note_type=str(meta.get("type") or ""),
     )
 
 
@@ -206,7 +208,7 @@ class NotesIndex:
                 *(load_one(path, sha) for path, sha in to_fetch)
             )
             for path, sha, note in loaded:
-                if note is not None:
+                if note is not None and note.note_type != "project":
                     known[path] = note
                     self._cache[path] = (sha, note)
 

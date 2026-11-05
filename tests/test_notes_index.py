@@ -125,3 +125,29 @@ def test_search_ignores_stopwords_only() -> None:
         return len(await index.search("что я писал"))
 
     assert asyncio.run(run()) == 0
+
+
+def test_reads_note_type() -> None:
+    note = parse_note("20_Projects/Бот.md", '---\ntype: project\ntitle: "Бот"\n---\n\n# Бот\n')
+    assert note.note_type == "project"
+
+
+def test_index_skips_project_hubs() -> None:
+    import asyncio
+
+    from services.notes_index import NotesIndex
+
+    class FakeGitHub:
+        async def list_markdown_blobs(self) -> list[tuple[str, str]]:
+            return [("20_Projects/Бот.md", "hub"), ("10_Notes/Note.md", "note")]
+
+        async def get_text(self, path: str) -> str:
+            if path.endswith("Бот.md"):
+                return '---\ntype: project\ntitle: "Бот"\n---\n\n# Бот\n'
+            return SAMPLE
+
+    async def run() -> list[str]:
+        index = NotesIndex(FakeGitHub())  # type: ignore[arg-type]
+        return [note.title for note in await index.notes()]
+
+    assert asyncio.run(run()) == ["Работа над внешним видом дашборда"]
