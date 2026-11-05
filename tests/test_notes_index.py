@@ -152,8 +152,12 @@ def test_index_skips_project_hubs() -> None:
                 return '---\ntype: project-template\ntitle: "Шаблон"\n---\n\n# Шаблон\n'
             return SAMPLE
 
-    async def run() -> list[str]:
+    async def run() -> tuple[list[str], list[str]]:
         index = NotesIndex(FakeGitHub())  # type: ignore[arg-type]
-        return [note.title for note in await index.notes()]
+        notes = await index.notes()
+        projects = await index.projects()
+        return [note.title for note in notes], [hub.title for hub in projects]
 
-    assert asyncio.run(run()) == ["Работа над внешним видом дашборда"]
+    titles, projects = asyncio.run(run())
+    assert titles == ["Работа над внешним видом дашборда"]
+    assert projects == ["Бот"]

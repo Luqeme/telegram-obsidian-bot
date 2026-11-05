@@ -17,6 +17,7 @@ from .note_builder import (
     sanitize_tag,
     slugify,
     wiki_link,
+    with_up_link,
 )
 from .notes_index import NoteInfo, NotesIndex
 
@@ -36,6 +37,7 @@ __all__ = [
     "sanitize_tag",
     "slugify",
     "wiki_link",
+    "with_up_link",
 ]
 
 

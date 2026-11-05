@@ -237,6 +237,25 @@ def _yaml_scalar(value: str) -> str:
     return value
 
 
+def with_up_link(content: str, project: str) -> str:
+    """Добавляет или заменяет поле up в frontmatter, не трогая остальной файл."""
+    safe = project.strip().replace('"', '\\"')
+    line = f'up: "[[{safe}]]"'
+
+    if not content.startswith("---"):
+        return f"---\n{line}\n---\n\n{content}"
+
+    end = content.find("\n---", 3)
+    if end == -1:
+        return content
+
+    header = content[3:end]  # начинается с \n
+    body = content[end + 4 :]
+    lines = [item for item in header.split("\n") if not item.startswith("up:")]
+    lines.append(line)
+    return "---" + "\n".join(lines) + "\n---" + body
+
+
 def build_frontmatter(
     draft: NoteDraft, source: NoteSource, created: datetime
 ) -> str:
@@ -251,7 +270,7 @@ def build_frontmatter(
     if tags:
         lines.append("tags:")
         lines.extend(f"  - {_yaml_scalar(tag)}" for tag in tags)
-    lines.extend(["status: inbox", "source: telegram", "---"])
+    lines.extend(["status: inbox", "source: telegram", "up:", "---"])
     return "\n".join(lines)
 
 

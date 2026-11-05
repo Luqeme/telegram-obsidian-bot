@@ -159,6 +159,7 @@ class NotesIndex:
         self._github = github
         self._ttl = ttl
         self._notes: list[NoteInfo] = []
+        self._projects: list[NoteInfo] = []
         self._cache: dict[str, tuple[str, NoteInfo]] = {}
         self._loaded_at = 0.0
         self._lock = asyncio.Lock()
@@ -186,11 +187,15 @@ class NotesIndex:
                 blobs = blobs[:MAX_FILES]
 
             known: dict[str, NoteInfo] = {}
+            projects: dict[str, NoteInfo] = {}
             to_fetch: list[tuple[str, str]] = []
             for path, sha in blobs:
                 cached = self._cache.get(path)
                 if cached is not None and cached[0] == sha:
-                    known[path] = cached[1]
+                    if cached[1].note_type == "project":
+                        projects[path] = cached[1]
+                    elif cached[1].note_type not in SKIP_TYPES:
+                        known[path] = cached[1]
                 else:
                     to_fetch.append((path, sha))
 
@@ -209,15 +214,22 @@ class NotesIndex:
                 *(load_one(path, sha) for path, sha in to_fetch)
             )
             for path, sha, note in loaded:
-                if note is not None and note.note_type not in SKIP_TYPES:
+                if note is None:
+                    continue
+                if note.note_type == "project":
+                    projects[path] = note
+                elif note.note_type not in SKIP_TYPES:
                     known[path] = note
-                    self._cache[path] = (sha, note)
+                self._cache[path] = (sha, note)
 
             current = {path for path, _ in blobs}
             self._cache = {
                 path: value for path, value in self._cache.items() if path in current
             }
             self._notes = [known[path] for path, _ in blobs if path in known]
+            self._projects = [
+                projects[path] for path, _ in blobs if path in projects
+            ]
             self._loaded_at = loop.time()
             logger.info(
                 "Индекс заметок: %s всего, %s обновлено", len(self._notes), len(to_fetch)
@@ -277,6 +289,11 @@ class NotesIndex:
 
         matches.sort(key=lambda pair: (-pair[0], pair[1].title.casefold()))
         return [note for _, note in matches[:limit]]
+
+    async def projects(self) -> list[NoteInfo]:
+        """Хабы проектов (type: project) — для кнопок выбора проекта."""
+        await self.notes()
+        return self._projects
 
     async def top_tags(self, limit: int = 30) -> list[str]:
         """Самые частые теги базы — чтобы модель не плодила синонимы."""

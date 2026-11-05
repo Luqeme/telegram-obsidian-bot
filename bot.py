@@ -111,7 +111,9 @@ async def main() -> int:
         bot = Bot(token=settings.telegram_bot_token)
         dispatcher = Dispatcher()
         dispatcher.workflow_data["services"] = services
-        dispatcher.message.middleware(AllowedUsersMiddleware(settings.allowed_user_ids))
+        auth = AllowedUsersMiddleware(settings.allowed_user_ids)
+        dispatcher.message.middleware(auth)
+        dispatcher.callback_query.middleware(auth)
         dispatcher.include_router(base_handlers.router)
         dispatcher.include_router(digest_handlers.router)
         dispatcher.include_router(notes_handlers.router)

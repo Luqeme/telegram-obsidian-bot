@@ -12,6 +12,7 @@ from services.note_builder import (
     build_markdown,
     normalize_tags,
     sanitize_tag,
+    with_up_link,
 )
 
 TZ = ZoneInfo("Asia/Yekaterinburg")
@@ -53,6 +54,32 @@ def test_frontmatter_is_valid_yaml() -> None:
     assert front["tags"] == ["backend", "пет-проект"]
     assert front["status"] == "inbox"
     assert front["source"] == "telegram"
+    assert "up" in front  # пустое поле, чтобы заполнить кнопкой или руками
+
+
+def test_with_up_link_adds_project() -> None:
+    markdown = build_markdown(make_draft(), ORIGINAL, "voice", NOW)
+    updated = with_up_link(markdown, "Дашборд")
+    front = parse_frontmatter(updated)
+
+    assert front["up"] == "[[Дашборд]]"
+    assert front["title"] == "Рефакторинг авторизации на JWT"
+    assert ORIGINAL in updated
+
+
+def test_with_up_link_replaces_existing() -> None:
+    markdown = with_up_link(
+        build_markdown(make_draft(), ORIGINAL, "voice", NOW), "Дашборд"
+    )
+    updated = with_up_link(markdown, "Бот")
+
+    assert parse_frontmatter(updated)["up"] == "[[Бот]]"
+    assert updated.count("up:") == 1
+
+
+def test_with_up_link_without_frontmatter() -> None:
+    updated = with_up_link("# Заметка\n", "Бот")
+    assert updated.startswith('---\nup: "[[Бот]]"\n---\n')
 
 
 def test_text_source_marks_type() -> None:

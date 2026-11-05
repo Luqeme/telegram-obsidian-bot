@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import html
 import io
 import logging
@@ -11,7 +12,12 @@ from datetime import datetime
 from aiogram import Bot, F, Router
 from aiogram.enums import ChatAction
 from aiogram.exceptions import TelegramAPIError
-from aiogram.types import Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
 from services import (
     GitHubError,
@@ -38,6 +44,12 @@ MAX_CARD_TASKS = 15
 
 MONEY_PATH = "30_Money/transactions.csv"
 MONEY_HEADER = "date,kind,amount,category,note"
+MAX_PROJECT_BUTTONS = 6
+
+# callback_data ограничена 64 байтами, а путь с кириллицей в неё не влезает,
+# поэтому в кнопке лежит короткий хеш, а путь — в памяти процесса.
+_PROJECT_NOTES: dict[str, str] = {}
+_PROJECT_HUBS: dict[str, str] = {}
 
 
 def _csv_row(values: list[str]) -> str:
@@ -256,10 +268,114 @@ async def _process(
         path,
     )
     services.index.invalidate()
-    await message.answer(
-        _render_card(path, draft),
-        parse_mode="HTML",
+
+    markup = await _project_keyboard(services, path)
+    card = _render_card(path, draft)
+    if markup is not None:
+        card += "\n\n🚀 <b>Проект?</b> Выбери кнопкой ниже."
+    await message.answer(card, parse_mode="HTML", reply_markup=markup)
+
+
+def _remember(mapping: dict[str, str], key: str, value: str, limit: int = 1000) -> None:
+    mapping[key] = value
+    while len(mapping) > limit:
+        mapping.pop(next(iter(mapping)))
+
+
+async def _project_keyboard(
+    services: Services, path: str
+) -> InlineKeyboardMarkup | None:
+    """Кнопки существующих проектов. None, если хабов ещё нет."""
+    try:
+        hubs = await services.index.projects()
+    except GitHubError as exc:
+        logger.warning("Не удалось получить проекты: %s", exc)
+        return None
+
+    if not hubs:
+        return None
+
+    token = hashlib.sha1(path.encode("utf-8")).hexdigest()[:12]
+    _remember(_PROJECT_NOTES, token, path)
+
+    buttons: list[InlineKeyboardButton] = []
+    for hub in hubs[:MAX_PROJECT_BUTTONS]:
+        key = hashlib.sha1(hub.path.encode("utf-8")).hexdigest()[:8]
+        _remember(_PROJECT_HUBS, key, hub.title)
+        buttons.append(
+            InlineKeyboardButton(
+                text=hub.title[:32],
+                callback_data=f"proj:{token}:{key}",
+            )
+        )
+
+    buttons.append(
+        InlineKeyboardButton(
+            text="Без проекта", callback_data=f"proj:{token}:none"
+        )
     )
+    rows = [buttons[index : index + 2] for index in range(0, len(buttons), 2)]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data.startswith("proj:"))
+async def on_project_choice(callback: CallbackQuery, services: Services) -> None:
+    parts = (callback.data or "").split(":")
+    if len(parts) != 3:
+        await callback.answer()
+        return
+
+    _, token, choice = parts
+    path = _PROJECT_NOTES.pop(token, None)
+    if path is None:
+        await callback.answer(
+            "Кнопка устарела — пришли заметку ещё раз.", show_alert=True
+        )
+        return
+
+    message = callback.message
+    if choice == "none":
+        await callback.answer("Без проекта")
+        if isinstance(message, Message):
+            try:
+                await message.edit_reply_markup(reply_markup=None)
+            except TelegramAPIError:
+                pass
+        return
+
+    project = _PROJECT_HUBS.get(choice)
+    if project is None:
+        await callback.answer(
+            "Проект не найден — пришли заметку ещё раз.", show_alert=True
+        )
+        return
+
+    try:
+        updated = await services.github.set_up_link(
+            path, project, f"Set project: {project}"
+        )
+    except GitHubError as exc:
+        logger.error("set_up_link: %s", exc)
+        await callback.answer(exc.user_message, show_alert=True)
+        return
+
+    if not updated:
+        await callback.answer("Не нашёл заметку в GitHub.", show_alert=True)
+        return
+
+    services.index.invalidate()
+    logger.info("project_linked path=%s project=%s", path, project)
+    await callback.answer("Готово")
+
+    if isinstance(message, Message):
+        try:
+            await message.edit_reply_markup(reply_markup=None)
+        except TelegramAPIError:
+            pass
+        await message.answer(
+            f"🚀 Заметка добавлена в проект <b>{html.escape(project)}</b>",
+            parse_mode="HTML",
+        )
 
 
 async def _save_money(
