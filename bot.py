@@ -20,6 +20,7 @@ from handlers import base as base_handlers
 from handlers import digest as digest_handlers
 from handlers import health as health_handlers
 from handlers import notes as notes_handlers
+from handlers import report as report_handlers
 from middlewares.auth import AllowedUsersMiddleware
 from services import GitHubService, GroqService, NotesIndex, Services
 
@@ -116,6 +117,7 @@ async def main() -> int:
         dispatcher.callback_query.middleware(auth)
         dispatcher.include_router(base_handlers.router)
         dispatcher.include_router(digest_handlers.router)
+        dispatcher.include_router(report_handlers.router)
         dispatcher.include_router(notes_handlers.router)
         dispatcher.errors.register(on_error)
 
@@ -131,6 +133,7 @@ async def main() -> int:
                         BotCommand(command="ask", description="Вопрос к базе"),
                         BotCommand(command="today", description="Сводка на сегодня"),
                         BotCommand(command="money", description="Деньги за месяц"),
+                        BotCommand(command="report", description="Отчёт за месяц"),
                         BotCommand(command="id", description="Мой Telegram ID"),
                     ]
                 )
@@ -153,6 +156,10 @@ async def main() -> int:
             if settings.weekly_ping_time:
                 background.append(
                     asyncio.create_task(health_handlers.weekly_loop(bot, services))
+                )
+            if settings.monthly_report_time:
+                background.append(
+                    asyncio.create_task(report_handlers.report_loop(bot, services))
                 )
 
             await dispatcher.start_polling(

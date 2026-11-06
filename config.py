@@ -63,8 +63,9 @@ class Settings(BaseSettings):
     filename_transliterate: bool = True
     digest_time: str = "09:00"
     weekly_ping_time: str = "10:00"
+    monthly_report_time: str = "10:00"
 
-    @field_validator("digest_time", "weekly_ping_time")
+    @field_validator("digest_time", "weekly_ping_time", "monthly_report_time")
     @classmethod
     def _check_digest_time(cls, value: str) -> str:
         value = value.strip()
