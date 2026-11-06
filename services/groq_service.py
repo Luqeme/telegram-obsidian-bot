@@ -134,6 +134,7 @@ class GroqService:
         today: date | None = None,
         known_tags: Sequence[str] = (),
         known_projects: str = "",
+        money_categories: Sequence[str] = (),
     ) -> NoteDraft:
         messages: list[dict[str, str]] = [
             {"role": "system", "content": SYSTEM_PROMPT}
@@ -150,6 +151,13 @@ class GroqService:
             )
         if known_projects:
             context.append(known_projects)
+        if money_categories:
+            context.append(
+                "Категории денег (используй подходящую из списка, новую создавай "
+                "только если ни одна не подходит): "
+                + ", ".join(money_categories)
+                + "."
+            )
         if context:
             messages.append({"role": "system", "content": "\n".join(context)})
 

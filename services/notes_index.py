@@ -30,7 +30,7 @@ DEFAULT_TTL = 600
 MAX_FILES = 500
 FETCH_CONCURRENCY = 6
 SKIP_NAMES = {"Dashboard.md", "Карта.md", "README.md"}
-SKIP_TYPES = {"project", "project-template"}
+SKIP_TYPES = {"project", "project-template", "money-categories"}
 
 STOPWORDS = frozenset(
     {
@@ -163,12 +163,32 @@ def parse_note(path: str, raw: str) -> NoteInfo:
     )
 
 
+def parse_money_categories(text: str) -> list[str]:
+    """Список категорий из файла: по одной на строку, можно с дефисом."""
+    result: list[str] = []
+    seen: set[str] = set()
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith(("#", ">", "```", "|")):
+            continue
+        if line.startswith(("- ", "* ")):
+            line = line[2:].strip()
+        if not line or len(line) > 40:
+            continue
+        key = line.casefold()
+        if key not in seen:
+            seen.add(key)
+            result.append(line)
+    return result[:40]
+
+
 class NotesIndex:
     def __init__(self, github: GitHubService, ttl: int = DEFAULT_TTL) -> None:
         self._github = github
         self._ttl = ttl
         self._notes: list[NoteInfo] = []
         self._projects: list[NoteInfo] = []
+        self._money_categories: list[str] = []
         self._cache: dict[str, tuple[str, NoteInfo]] = {}
         self._loaded_at = 0.0
         self._lock = asyncio.Lock()
@@ -197,12 +217,15 @@ class NotesIndex:
 
             known: dict[str, NoteInfo] = {}
             projects: dict[str, NoteInfo] = {}
+            money_categories: list[str] = []
             to_fetch: list[tuple[str, str]] = []
             for path, sha in blobs:
                 cached = self._cache.get(path)
                 if cached is not None and cached[0] == sha:
                     if cached[1].note_type == "project":
                         projects[path] = cached[1]
+                    elif cached[1].note_type == "money-categories":
+                        money_categories = parse_money_categories(cached[1].text)
                     elif cached[1].note_type not in SKIP_TYPES:
                         known[path] = cached[1]
                 else:
@@ -227,6 +250,8 @@ class NotesIndex:
                     continue
                 if note.note_type == "project":
                     projects[path] = note
+                elif note.note_type == "money-categories":
+                    money_categories = parse_money_categories(note.text)
                 elif note.note_type not in SKIP_TYPES:
                     known[path] = note
                 self._cache[path] = (sha, note)
@@ -239,6 +264,7 @@ class NotesIndex:
             self._projects = [
                 projects[path] for path, _ in blobs if path in projects
             ]
+            self._money_categories = money_categories
             self._loaded_at = loop.time()
             logger.info(
                 "Индекс заметок: %s всего, %s обновлено", len(self._notes), len(to_fetch)
@@ -307,6 +333,11 @@ class NotesIndex:
     async def areas(self) -> list[NoteInfo]:
         """Бытовые области (type: area) — сюда бот дописывает задачи."""
         return [note for note in await self.notes() if note.note_type == "area"]
+
+    async def money_categories(self) -> list[str]:
+        """Категории денег из файла в хранилище (пусто, если файла нет)."""
+        await self.notes()
+        return self._money_categories
 
     async def top_tags(self, limit: int = 30) -> list[str]:
         """Самые частые теги базы — чтобы модель не плодила синонимы."""

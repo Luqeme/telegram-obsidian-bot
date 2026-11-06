@@ -144,6 +144,54 @@ def test_reads_project_metadata() -> None:
     assert note.description == "Бот учёта уколов"
 
 
+def test_parse_money_categories() -> None:
+    from services.notes_index import parse_money_categories
+
+    text = """
+# 💰 Категории
+
+- Еда
+* Транспорт
+Дом
+- еда
+> комментарий
+"""
+    assert parse_money_categories(text) == ["Еда", "Транспорт", "Дом"]
+
+
+def test_index_reads_money_categories() -> None:
+    import asyncio
+
+    from services.notes_index import NotesIndex
+
+    class FakeGitHub:
+        async def list_markdown_blobs(self) -> list[tuple[str, str]]:
+            return [
+                ("30_Money/Категории.md", "cat"),
+                ("10_Notes/Note.md", "note"),
+            ]
+
+        async def get_text(self, path: str) -> str:
+            if path.endswith("Категории.md"):
+                return (
+                    '---\ntype: money-categories\ntitle: "Категории"\n---\n\n'
+                    "# Категории\n\n- Еда\n- Ипотека\n"
+                )
+            return SAMPLE
+
+    async def run() -> tuple[list[str], list[str]]:
+        index = NotesIndex(FakeGitHub())  # type: ignore[arg-type]
+        notes = await index.notes()
+        return (
+            [note.title for note in notes],
+            await index.money_categories(),
+        )
+
+    titles, categories = asyncio.run(run())
+    assert categories == ["Еда", "Ипотека"]
+    assert "Категории" not in titles  # служебный файл не попадает в поиск
+
+
 def test_area_hub_is_indexed_and_returned() -> None:
     import asyncio
 

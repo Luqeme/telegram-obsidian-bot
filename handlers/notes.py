@@ -19,6 +19,7 @@ from aiogram.types import (
     Message,
 )
 
+from prompts import DEFAULT_MONEY_CATEGORIES
 from services import (
     GitHubError,
     GroqError,
@@ -259,6 +260,7 @@ async def _process(
 
     known_tags: list[str] = []
     project_context = ""
+    money_categories: list[str] = []
     try:
         known_tags = await services.index.top_tags(limit=30)
     except GitHubError as exc:
@@ -268,6 +270,14 @@ async def _process(
         _, project_context = await _index_context(services)
     except GitHubError as exc:
         logger.warning("Не удалось получить проекты: %s", exc)
+
+    try:
+        money_categories = await services.index.money_categories()
+    except GitHubError as exc:
+        logger.warning("Не удалось получить категории денег: %s", exc)
+    if not money_categories:
+        money_categories = list(DEFAULT_MONEY_CATEGORIES)
+
     try:
         draft = await services.groq.structure_note(
             text,  # type: ignore[arg-type]
@@ -275,6 +285,7 @@ async def _process(
             today=now.date(),
             known_tags=known_tags,
             known_projects=project_context,
+            money_categories=money_categories,
         )
     except GroqError as exc:
         logger.error("structure_note: %s", exc)
