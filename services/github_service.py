@@ -34,6 +34,19 @@ class GitHubPathExists(GitHubError):
     """Файл с таким путём уже есть в ветке."""
 
 
+def drop_last_lines(content: str, lines: list[str]) -> tuple[str, int]:
+    """Удаляет последние вхождения строк. Возвращает (новый текст, сколько удалено)."""
+    removed = 0
+    for line in lines:
+        target = line + "\n"
+        index = content.rfind(target)
+        if index == -1:
+            continue
+        content = content[:index] + content[index + len(target) :]
+        removed += 1
+    return content, removed
+
+
 class GitHubService:
     def __init__(
         self,
@@ -250,6 +263,97 @@ class GitHubService:
             )
 
         return False
+
+    async def delete_file(self, path: str, commit_message: str) -> bool:
+        """Удаляет файл из ветки. False, если файла уже нет."""
+        url = f"{API_URL}/repos/{self._repo}/contents/{quote(path, safe='/')}"
+
+        for attempt in range(2):
+            response = await self._client.get(
+                url,
+                headers=self._headers,
+                params={"ref": self._branch},
+                timeout=FILE_TIMEOUT,
+            )
+            if response.status_code == 404:
+                return False
+            if response.status_code != 200:
+                raise GitHubError(
+                    f"GitHub GET {path}: {response.status_code}",
+                    "❌ Не удалось прочитать заметку.",
+                )
+
+            payload = {
+                "message": commit_message,
+                "sha": response.json()["sha"],
+                "branch": self._branch,
+            }
+            deleted = await self._client.delete(
+                url, json=payload, headers=self._headers, timeout=FILE_TIMEOUT
+            )
+            if deleted.status_code in (200, 201):
+                return True
+            if deleted.status_code == 404:
+                return False
+            if deleted.status_code in (409, 422) and attempt == 0:
+                logger.warning("GitHub: конфликт при удалении, повторяю")
+                continue
+            raise GitHubError(
+                f"GitHub DELETE {path}: {deleted.status_code}",
+                "❌ Не удалось удалить заметку.",
+            )
+
+        return False
+
+    async def remove_lines(
+        self, path: str, lines: list[str], commit_message: str
+    ) -> int:
+        """Удаляет последние вхождения строк. Возвращает число удалённых."""
+        if not lines:
+            return 0
+        url = f"{API_URL}/repos/{self._repo}/contents/{quote(path, safe='/')}"
+
+        for attempt in range(2):
+            response = await self._client.get(
+                url,
+                headers=self._headers,
+                params={"ref": self._branch},
+                timeout=FILE_TIMEOUT,
+            )
+            if response.status_code == 404:
+                return 0
+            if response.status_code != 200:
+                raise GitHubError(
+                    f"GitHub GET {path}: {response.status_code}",
+                    "❌ Не удалось прочитать файл.",
+                )
+
+            data = response.json()
+            content = base64.b64decode(data["content"]).decode("utf-8")
+            content, removed = drop_last_lines(content, lines)
+            if removed == 0:
+                return 0
+
+            payload = {
+                "message": commit_message,
+                "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+                "sha": data["sha"],
+                "branch": self._branch,
+            }
+            put = await self._client.put(
+                url, json=payload, headers=self._headers, timeout=FILE_TIMEOUT
+            )
+            if put.status_code in (200, 201):
+                return removed
+            if put.status_code in (409, 422) and attempt == 0:
+                logger.warning("GitHub: конфликт при откате, повторяю")
+                continue
+            raise GitHubError(
+                f"GitHub PUT {path}: {put.status_code}",
+                "❌ Не удалось отменить действие.",
+            )
+
+        return 0
 
     async def append_line(
         self,

@@ -1,6 +1,8 @@
 # Секреты
 .env
 HANDOFF.md
+undo_state.json
+undo_state.tmp
 
 # Python
 __pycache__/

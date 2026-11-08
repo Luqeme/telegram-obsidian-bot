@@ -134,6 +134,7 @@ async def main() -> int:
                         BotCommand(command="today", description="Сводка на сегодня"),
                         BotCommand(command="money", description="Деньги за месяц"),
                         BotCommand(command="report", description="Отчёт за месяц"),
+                        BotCommand(command="undo", description="Отменить последнее"),
                         BotCommand(command="id", description="Мой Telegram ID"),
                     ]
                 )

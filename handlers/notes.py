@@ -12,6 +12,7 @@ from datetime import datetime
 from aiogram import Bot, F, Router
 from aiogram.enums import ChatAction
 from aiogram.exceptions import TelegramAPIError
+from aiogram.filters import Command
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -33,6 +34,7 @@ from services import (
     wiki_link,
     with_up_link,
 )
+from services.undo import Action, UndoStore
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,8 @@ MAX_CARD_TASKS = 15
 MONEY_PATH = "30_Money/transactions.csv"
 MONEY_HEADER = "date,kind,amount,category,note"
 PROJECT_PAGE_SIZE = 6
+
+UNDO = UndoStore()
 
 # callback_data ограничена 64 байтами, а путь с кириллицей в неё не влезает,
 # поэтому в кнопке лежит короткий хеш, а путь — в памяти процесса.
@@ -83,6 +87,53 @@ def check_voice_limits(size: int, duration: int, limit_mb: int) -> str | None:
             f"Максимум {limit_mb} МБ."
         )
     return None
+
+
+@router.message(Command("undo"))
+async def cmd_undo(message: Message, services: Services) -> None:
+    """Откатывает последнее сохранение: заметку, транзакцию или бытовую задачу."""
+    user = message.from_user
+    if user is None:
+        return
+
+    action = UNDO.pop(user.id)
+    if action is None:
+        await message.answer("↩️ Нечего отменять.")
+        return
+
+    try:
+        if action.kind == "note":
+            deleted = await services.github.delete_file(
+                action.path, f"Undo: delete {action.path}"
+            )
+            if not deleted:
+                await message.answer(
+                    "↩️ Не нашёл файл: возможно, его уже удалили или перенесли."
+                )
+                return
+            services.index.invalidate()
+            logger.info("undo_note path=%s", action.path)
+            await message.answer(
+                f"↩️ Удалена заметка:\n<code>{html.escape(action.path)}</code>",
+                parse_mode="HTML",
+            )
+            return
+
+        removed = await services.github.remove_lines(
+            action.path, action.lines, "Undo: remove last entry"
+        )
+        if removed == 0:
+            await message.answer("↩️ Уже изменено — откатывать нечего.")
+            return
+        services.index.invalidate()
+        logger.info("undo_lines path=%s removed=%s", action.path, removed)
+        await message.answer(
+            f"↩️ Отменено: {html.escape(action.label)} (строк: {removed})."
+        )
+    except GitHubError as exc:
+        UNDO.push(user.id, action)
+        logger.error("undo: %s", exc)
+        await message.answer(exc.user_message)
 
 
 @router.message(F.text & ~F.text.startswith("/"))
@@ -189,6 +240,11 @@ async def handle_voice(message: Message, bot: Bot, services: Services) -> None:
     logger.info("voice_transcribed user_id=%s chars=%s", message.from_user.id, len(text))
     await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
     await _process(bot, message, services, text=text, original=text, source="voice")
+
+
+def _push_undo(message: Message, action: Action) -> None:
+    if message.from_user is not None:
+        UNDO.push(message.from_user.id, action)
 
 
 async def _index_context(services: Services) -> tuple[str, str]:
@@ -361,6 +417,7 @@ async def _process(
         path,
     )
     services.index.invalidate()
+    _push_undo(message, Action(kind="note", path=path, label="заметка"))
 
     markup = await _project_keyboard(services, path)
     card = _render_card(path, draft, target.title if target is not None else "")
@@ -549,6 +606,10 @@ async def _save_area_tasks(
 
     services.index.invalidate()
     logger.info("area_saved path=%s tasks=%s", area.path, len(lines))
+    _push_undo(
+        message,
+        Action(kind="lines", path=area.path, lines=lines, label="бытовое дело"),
+    )
 
     bullets = []
     for task in tasks[:10]:
@@ -599,6 +660,10 @@ async def _save_money(
     kind = "Расход" if draft.money_kind == "expense" else "Доход"
     sign = "−" if draft.money_kind == "expense" else "+"
     logger.info("money_saved kind=%s amount=%s category=%s", draft.money_kind, amount, category)
+    _push_undo(
+        message,
+        Action(kind="lines", path=MONEY_PATH, lines=[row], label="транзакция"),
+    )
     await message.answer(
         f"💰 <b>{kind} записан</b>\n\n"
         f"{sign}{amount} ₽ · {html.escape(category)}",
