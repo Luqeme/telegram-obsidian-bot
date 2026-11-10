@@ -41,6 +41,17 @@ def test_undo_store_keeps_last_ten(tmp_path) -> None:
     assert store.pop(1) is None
 
 
+def test_action_kinds_persist(tmp_path) -> None:
+    path = tmp_path / "undo.json"
+    store = UndoStore(path)
+    store.push(2, Action(kind="replace", path="a.md", lines=["new", "old"]))
+    store.push(2, Action(kind="move", path="b.md", lines=["00_Inbox/b.md"]))
+
+    restored = UndoStore(path)
+    assert restored.pop(2).kind == "move"
+    assert restored.pop(2).kind == "replace"
+
+
 def test_drop_last_lines_removes_last_occurrence() -> None:
     content, removed = drop_last_lines("a\nb\nb\nc\n", ["b"])
     assert removed == 1

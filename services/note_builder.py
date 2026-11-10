@@ -88,6 +88,7 @@ class NoteDraft(BaseModel):
     money_amount: float = 0
     money_category: str = ""
     project: str = ""
+    completed_task: str = ""
 
     @field_validator("tasks", mode="before")
     @classmethod

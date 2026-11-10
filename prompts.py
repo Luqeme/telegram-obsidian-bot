@@ -63,6 +63,9 @@ SYSTEM_PROMPT = """Ты — персональный секретарь и ар�
 9. project — точное название проекта или бытовой области из списка в контексте,
    если текст явно относится к нему (название или алиас прозвучали). Иначе пустая
    строка. Не придумывай проект, которого нет в списке, и не угадывай по общим словам.
+10. completed_task — если человек сообщает о уже выполненном деле (купил, оплатил,
+    сходил, забрал, сделал, закрыл), впиши это действие одной строкой. Иначе пустая
+    строка. Это не новая заметка, а сигнал закрыть существующую задачу.
 """
 
 NOTE_DRAFT_SCHEMA: dict = {
@@ -79,6 +82,7 @@ NOTE_DRAFT_SCHEMA: dict = {
         "money_amount",
         "money_category",
         "project",
+        "completed_task",
     ],
     "properties": {
         "is_meaningful": {"type": "boolean"},
@@ -106,5 +110,6 @@ NOTE_DRAFT_SCHEMA: dict = {
         "money_amount": {"type": "number"},
         "money_category": {"type": "string"},
         "project": {"type": "string"},
+        "completed_task": {"type": "string"},
     },
 }

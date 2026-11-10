@@ -20,7 +20,7 @@ DEFAULT_PATH = Path(__file__).resolve().parent.parent / "undo_state.json"
 
 @dataclass(slots=True)
 class Action:
-    kind: str  # "note" — удалить файл, "lines" — убрать строки из файла
+    kind: str  # note | lines | replace | move
     path: str
     lines: list[str] = field(default_factory=list)
     label: str = "действие"
@@ -39,7 +39,7 @@ class Action:
             return None
         kind = raw.get("kind")
         path = raw.get("path")
-        if kind not in {"note", "lines"} or not isinstance(path, str) or not path:
+        if kind not in {"note", "lines", "replace", "move"} or not isinstance(path, str) or not path:
             return None
         lines = raw.get("lines")
         if not isinstance(lines, list) or not all(isinstance(item, str) for item in lines):

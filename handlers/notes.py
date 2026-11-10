@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import difflib
 import hashlib
 import html
 import io
@@ -35,6 +36,7 @@ from services import (
     with_up_link,
 )
 from services.undo import Action, UndoStore
+from services.notes_index import STOPWORDS, WORD_RE, TaskRef
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +60,7 @@ UNDO = UndoStore()
 # поэтому в кнопке лежит короткий хеш, а путь — в памяти процесса.
 _PROJECT_NOTES: dict[str, str] = {}
 _PROJECT_HUBS: dict[str, str] = {}
+_PROJECT_FOLDERS: dict[str, str] = {}
 
 
 def _csv_row(values: list[str]) -> str:
@@ -115,6 +118,41 @@ async def cmd_undo(message: Message, services: Services) -> None:
             logger.info("undo_note path=%s", action.path)
             await message.answer(
                 f"↩️ Удалена заметка:\n<code>{html.escape(action.path)}</code>",
+                parse_mode="HTML",
+            )
+            return
+
+        if action.kind == "replace" and len(action.lines) >= 2:
+            restored = await services.github.replace_line(
+                action.path,
+                action.lines[0],
+                action.lines[1],
+                "Undo: restore line",
+            )
+            if not restored:
+                await message.answer("↩️ Строка уже изменилась — откатывать нечего.")
+                return
+            services.index.invalidate()
+            logger.info("undo_replace path=%s", action.path)
+            await message.answer(f"↩️ Отменено: {html.escape(action.label)}.")
+            return
+
+        if action.kind == "move" and action.lines:
+            original = action.lines[0]
+            folder = original.rsplit("/", 1)[0] if "/" in original else ""
+            if not folder:
+                await message.answer("↩️ Не удалось определить исходную папку.")
+                return
+            moved = await services.github.move_file(
+                action.path, folder, "Undo: move back"
+            )
+            if moved is None:
+                await message.answer("↩️ Не нашёл файл для возврата.")
+                return
+            services.index.invalidate()
+            logger.info("undo_move path=%s back=%s", action.path, moved)
+            await message.answer(
+                f"↩️ Возвращено:\n<code>{html.escape(moved)}</code>",
                 parse_mode="HTML",
             )
             return
@@ -247,6 +285,11 @@ def _push_undo(message: Message, action: Action) -> None:
         UNDO.push(message.from_user.id, action)
 
 
+def _push_undo_user(user_id: int, action: Action) -> None:
+    if user_id:
+        UNDO.push(user_id, action)
+
+
 async def _index_context(services: Services) -> tuple[str, str]:
     """(словарь для Whisper, описание проектов для LLM)."""
     try:
@@ -301,6 +344,85 @@ async def _index_context(services: Services) -> tuple[str, str]:
             "забрать посылку), укажи точное название области в поле project."
         )
     return hint, context
+
+
+def _stem_tokens(text: str) -> set[str]:
+    """Первые 4 буквы слов: «купил» и «купить» дают один корень."""
+    return {
+        token[:4]
+        for token in WORD_RE.findall(text.casefold())
+        if len(token) >= 4 and token not in STOPWORDS
+    }
+
+
+def _find_open_task(query: str, tasks: list[TaskRef]) -> TaskRef | None:
+    wanted = _stem_tokens(query)
+    if not wanted:
+        return None
+
+    best: tuple[float, TaskRef] | None = None
+    for task in tasks:
+        have = _stem_tokens(task.text)
+        if not have:
+            continue
+        overlap = len(wanted & have) / len(wanted)
+        ratio = difflib.SequenceMatcher(
+            None, " ".join(sorted(wanted)), " ".join(sorted(have))
+        ).ratio()
+        score = max(overlap, ratio * 0.9)
+        if score < 0.5:
+            continue
+        if best is None or score > best[0]:
+            best = (score, task)
+    return best[1] if best else None
+
+
+async def _complete_task(message: Message, services: Services, query: str) -> bool:
+    """Закрывает подходящую открытую задачу. False, если не нашлась."""
+    try:
+        tasks = await services.index.open_tasks()
+    except GitHubError as exc:
+        logger.error("complete_task: %s", exc)
+        await message.answer(exc.user_message)
+        return True
+
+    task = _find_open_task(query, tasks)
+    if task is None:
+        return False
+
+    done = datetime.now(services.settings.tz).strftime("%Y-%m-%d")
+    old_line = f"- [ ] {task.raw}"
+    new_line = f"- [x] {task.raw} ✅ {done}"
+
+    try:
+        updated = await services.github.replace_line(
+            task.note.path, old_line, new_line, f"Task done: {task.text}"
+        )
+    except GitHubError as exc:
+        logger.error("complete_task: %s", exc)
+        await message.answer(exc.user_message)
+        return True
+
+    if not updated:
+        await message.answer("✅ Задача уже закрыта или изменилась.")
+        return True
+
+    services.index.invalidate()
+    _push_undo(
+        message,
+        Action(
+            kind="replace",
+            path=task.note.path,
+            lines=[new_line, old_line],
+            label="задача",
+        ),
+    )
+    logger.info("task_done_voice path=%s", task.note.path)
+    await message.answer(
+        f"✅ Задача закрыта:\n<b>{html.escape(task.text)}</b>",
+        parse_mode="HTML",
+    )
+    return True
 
 
 async def _process(
@@ -358,6 +480,15 @@ async def _process(
         await _save_money(message, services, draft, original, created)
         return
 
+    if draft.completed_task:
+        if await _complete_task(message, services, draft.completed_task):
+            return
+        await message.answer(
+            "✅ Похоже, это выполненное дело, но открытой задачи не нашёл. "
+            "Если это новая мысль — переформулируй как заметку."
+        )
+        return
+
     target = None
     if draft.project:
         try:
@@ -397,9 +528,12 @@ async def _process(
         transliterate=services.settings.filename_transliterate,
     )
     commit_message = f"Add note from Telegram: {draft.title}"
+    directory = target.folder if target is not None else None
 
     try:
-        path, _ = await services.github.save_note(filename, content, commit_message)
+        path, _ = await services.github.save_note(
+            filename, content, commit_message, directory=directory
+        )
     except GitHubError as exc:
         logger.error("save_note: %s", exc)
         await message.answer(
@@ -472,6 +606,7 @@ async def _project_keyboard(
     for hub in chunk:
         key = hashlib.sha1(hub.path.encode("utf-8")).hexdigest()[:8]
         _remember(_PROJECT_HUBS, key, hub.title)
+        _remember(_PROJECT_FOLDERS, key, hub.folder)
         buttons.append(
             InlineKeyboardButton(
                 text=hub.title[:32],
@@ -481,7 +616,7 @@ async def _project_keyboard(
 
     buttons.append(
         InlineKeyboardButton(
-            text="Без проекта", callback_data=f"proj:{token}:none"
+            text="📥 Оставить", callback_data=f"proj:{token}:none"
         )
     )
     rows = [buttons[index : index + 2] for index in range(0, len(buttons), 2)]
@@ -502,17 +637,38 @@ async def _project_keyboard(
             )
         rows.append(nav)
 
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="🗂 В архив", callback_data=f"triage:{token}:archive"
+            ),
+            InlineKeyboardButton(
+                text="🗑 Удалить", callback_data=f"triage:{token}:delete"
+            ),
+        ]
+    )
+
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-@router.callback_query(F.data.startswith("proj:"))
+async def _clear_markup(message: Message | None) -> None:
+    if isinstance(message, Message):
+        try:
+            await message.edit_reply_markup(reply_markup=None)
+        except TelegramAPIError:
+            pass
+
+
+@router.callback_query(
+    F.data.startswith("proj:") | F.data.startswith("triage:")
+)
 async def on_project_choice(callback: CallbackQuery, services: Services) -> None:
     parts = (callback.data or "").split(":")
     if len(parts) != 3:
         await callback.answer()
         return
 
-    _, token, choice = parts
+    prefix, token, choice = parts
     path = _PROJECT_NOTES.get(token)
     if path is None:
         await callback.answer(
@@ -522,29 +678,114 @@ async def on_project_choice(callback: CallbackQuery, services: Services) -> None
 
     message = callback.message
 
-    if choice.startswith("page"):
+    if prefix == "proj" and choice.startswith("page"):
         try:
             page = int(choice[4:])
         except ValueError:
             page = 0
         markup = await _project_keyboard(services, path, page)
-        if isinstance(message, Message) and markup is not None:
+        if markup is not None:
             try:
-                await message.edit_reply_markup(reply_markup=markup)
+                if isinstance(message, Message):
+                    await message.edit_reply_markup(reply_markup=markup)
             except TelegramAPIError:
                 pass
         await callback.answer()
         return
 
-    _PROJECT_NOTES.pop(token, None)
+    if prefix == "triage":
+        if choice == "cancel":
+            markup = await _project_keyboard(services, path, 0)
+            if markup is not None and isinstance(message, Message):
+                try:
+                    await message.edit_reply_markup(reply_markup=markup)
+                except TelegramAPIError:
+                    pass
+            await callback.answer("Отменено")
+            return
+
+        if choice == "delete":
+            confirm = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="Да, удалить",
+                            callback_data=f"triage:{token}:confirmed",
+                        ),
+                        InlineKeyboardButton(
+                            text="Отмена",
+                            callback_data=f"triage:{token}:cancel",
+                        ),
+                    ]
+                ]
+            )
+            if isinstance(message, Message):
+                try:
+                    await message.edit_reply_markup(reply_markup=confirm)
+                except TelegramAPIError:
+                    pass
+            await callback.answer("Удалить заметку?")
+            return
+
+        if choice == "confirmed":
+            try:
+                deleted = await services.github.delete_file(
+                    path, f"Delete note: {path}"
+                )
+            except GitHubError as exc:
+                logger.error("triage delete: %s", exc)
+                await callback.answer(exc.user_message, show_alert=True)
+                return
+            if not deleted:
+                await callback.answer("Заметка уже удалена.", show_alert=True)
+                return
+            _PROJECT_NOTES.pop(token, None)
+            services.index.invalidate()
+            await _clear_markup(message)
+            await callback.answer("Удалено")
+            logger.info("triage_deleted path=%s", path)
+            return
+
+        if choice == "archive":
+            try:
+                moved = await services.github.move_file(
+                    path, "90_Archive", f"Archive note: {path}"
+                )
+            except GitHubError as exc:
+                logger.error("triage archive: %s", exc)
+                await callback.answer(exc.user_message, show_alert=True)
+                return
+            if moved is None:
+                await callback.answer("Не нашёл заметку.", show_alert=True)
+                return
+            _PROJECT_NOTES.pop(token, None)
+            services.index.invalidate()
+            await _clear_markup(message)
+            await callback.answer("В архиве")
+            logger.info("triage_archived path=%s to=%s", path, moved)
+            _push_undo_user(
+                callback.from_user.id,
+                Action(
+                    kind="move",
+                    path=moved,
+                    lines=[path],
+                    label="перенос в архив",
+                ),
+            )
+            if isinstance(message, Message):
+                await message.answer(
+                    f"🗂 Перенесено в архив:\n<code>{html.escape(moved)}</code>",
+                    parse_mode="HTML",
+                )
+            return
+
+        await callback.answer()
+        return
 
     if choice == "none":
-        await callback.answer("Без проекта")
-        if isinstance(message, Message):
-            try:
-                await message.edit_reply_markup(reply_markup=None)
-            except TelegramAPIError:
-                pass
+        _PROJECT_NOTES.pop(token, None)
+        await callback.answer("Оставил как есть")
+        await _clear_markup(message)
         return
 
     project = _PROJECT_HUBS.get(choice)
@@ -567,17 +808,41 @@ async def on_project_choice(callback: CallbackQuery, services: Services) -> None
         await callback.answer("Не нашёл заметку в GitHub.", show_alert=True)
         return
 
+    new_path = path
+    inbox = services.settings.obsidian_inbox_dir.strip("/")
+    if path.startswith(f"{inbox}/"):
+        folder = _PROJECT_FOLDERS.get(choice, "20_Projects")
+        try:
+            moved = await services.github.move_file(
+                path, folder, f"Move to project: {project}"
+            )
+        except GitHubError as exc:
+            logger.error("move to project: %s", exc)
+            await callback.answer(exc.user_message, show_alert=True)
+            return
+        if moved is not None:
+            new_path = moved
+
+    _PROJECT_NOTES.pop(token, None)
     services.index.invalidate()
-    logger.info("project_linked path=%s project=%s", path, project)
+    logger.info("project_linked path=%s project=%s", new_path, project)
+    if new_path != path:
+        _push_undo_user(
+            callback.from_user.id,
+            Action(
+                kind="move",
+                path=new_path,
+                lines=[path],
+                label="перенос в проект",
+            ),
+        )
     await callback.answer("Готово")
+    await _clear_markup(message)
 
     if isinstance(message, Message):
-        try:
-            await message.edit_reply_markup(reply_markup=None)
-        except TelegramAPIError:
-            pass
         await message.answer(
-            f"🚀 Заметка добавлена в проект <b>{html.escape(project)}</b>",
+            f"🚀 Заметка в проекте <b>{html.escape(project)}</b>\n"
+            f"<code>{html.escape(new_path)}</code>",
             parse_mode="HTML",
         )
 

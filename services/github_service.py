@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+from pathlib import PurePosixPath
 from urllib.parse import quote
 
 import httpx
@@ -71,16 +72,22 @@ class GitHubService:
     # ── Публичный вход ───────────────────────────────────────
 
     async def save_note(
-        self, filename: str, content: str, commit_message: str
+        self,
+        filename: str,
+        content: str,
+        commit_message: str,
+        *,
+        directory: str | None = None,
     ) -> tuple[str, str]:
-        """Кладёт файл в инбокс. Возвращает (путь в репозитории, ссылку).
+        """Кладёт файл в инбокс (или в указанную папку). Возвращает (путь, ссылку).
 
         При коллизии имени добавляет суффикс -2, -3, ... (максимум 5 попыток).
         """
+        base = (directory or self._inbox).strip("/")
         stem, dot, suffix = filename.partition(".")
         for attempt in range(1, 6):
             name = filename if attempt == 1 else f"{stem}-{attempt}.{suffix}"
-            path = f"{self._inbox}/{name}"
+            path = f"{base}/{name}"
             try:
                 url = await self.push_markdown_note(path, content, commit_message)
             except GitHubPathExists:
@@ -264,6 +271,46 @@ class GitHubService:
 
         return False
 
+    async def move_file(
+        self, src: str, destination_dir: str, commit_message: str
+    ) -> str | None:
+        """Переносит файл в другую папку. None, если исходника нет."""
+        raw = await self.get_text(src)
+        if not raw:
+            return None
+
+        destination = destination_dir.strip("/")
+        name = PurePosixPath(src).name
+        if f"{destination}/{name}" == src:
+            return src
+
+        stem, dot, suffix = name.rpartition(".")
+        if not dot:
+            stem, suffix = name, ""
+
+        for attempt in range(1, 6):
+            if attempt == 1:
+                candidate = name
+            elif suffix:
+                candidate = f"{stem}-{attempt}.{suffix}"
+            else:
+                candidate = f"{stem}-{attempt}"
+            target = f"{destination}/{candidate}"
+            try:
+                await self.push_markdown_note(target, raw, commit_message)
+            except GitHubPathExists:
+                logger.warning("Файл %s уже есть, пробую другое имя", target)
+                continue
+
+            if not await self.delete_file(src, commit_message):
+                logger.warning("move: исходный файл уже исчез: %s", src)
+            return target
+
+        raise GitHubError(
+            "не удалось подобрать свободное имя при переносе",
+            "❌ Не удалось перенести заметку: имя занято 5 раз подряд.",
+        )
+
     async def delete_file(self, path: str, commit_message: str) -> bool:
         """Удаляет файл из ветки. False, если файла уже нет."""
         url = f"{API_URL}/repos/{self._repo}/contents/{quote(path, safe='/')}"
@@ -288,8 +335,8 @@ class GitHubService:
                 "sha": response.json()["sha"],
                 "branch": self._branch,
             }
-            deleted = await self._client.delete(
-                url, json=payload, headers=self._headers, timeout=FILE_TIMEOUT
+            deleted = await self._client.request(
+                "DELETE", url, json=payload, headers=self._headers, timeout=FILE_TIMEOUT
             )
             if deleted.status_code in (200, 201):
                 return True

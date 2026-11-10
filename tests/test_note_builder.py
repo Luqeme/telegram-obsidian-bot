@@ -164,8 +164,11 @@ def test_draft_carries_project_and_schema_requires_it() -> None:
 
     assert make_draft(project="Shot Bot").project == "Shot Bot"
     assert make_draft().project == ""
+    assert make_draft(completed_task="Купил молоко").completed_task == "Купил молоко"
     assert "project" in NOTE_DRAFT_SCHEMA["required"]
+    assert "completed_task" in NOTE_DRAFT_SCHEMA["required"]
     assert NOTE_DRAFT_SCHEMA["properties"]["project"] == {"type": "string"}
+    assert NOTE_DRAFT_SCHEMA["properties"]["completed_task"] == {"type": "string"}
 
 
 def test_related_section_rendered() -> None:

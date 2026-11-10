@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from handlers.notes import MAX_AUDIO_SECONDS, _match_target, check_voice_limits
+from handlers.notes import (
+    MAX_AUDIO_SECONDS,
+    _find_open_task,
+    _match_target,
+    check_voice_limits,
+)
 
 LIMIT_MB = 20
 
@@ -52,6 +57,17 @@ def test_project_matches_title_or_alias() -> None:
     assert _match_target("бот", hubs).title == "Бот"
     assert _match_target("несуществующий", hubs) is None
     assert _match_target("", hubs) is None
+
+
+def test_find_open_task_by_past_tense() -> None:
+    tasks = [
+        SimpleNamespace(text="Купить молоко"),
+        SimpleNamespace(text="Оплатить интернет"),
+    ]
+
+    assert _find_open_task("купил молоко", tasks).text == "Купить молоко"
+    assert _find_open_task("оплатил интернет", tasks).text == "Оплатить интернет"
+    assert _find_open_task("сделал отчёт", tasks) is None
 
 
 def test_card_has_no_github_link() -> None:
