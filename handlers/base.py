@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import csv
 import html
-import io
 import logging
 import re
 from datetime import datetime
@@ -14,11 +12,11 @@ from aiogram.filters import Command, CommandStart, Filter
 from aiogram.types import ForceReply, Message
 
 from services import GitHubError, GroqError, Services
+from services.money import MONEY_PATH, month_label, parse_rows, summarize
 
 router = Router(name="base")
 logger = logging.getLogger(__name__)
 
-MONEY_PATH = "30_Money/transactions.csv"
 SEARCH_LIMIT = 5
 SNIPPET_PAD = 60
 ASK_CONTEXT_NOTES = 5
@@ -204,46 +202,38 @@ async def on_pending_reply(message: Message, services: Services) -> None:
 
 @router.message(Command("money"))
 async def cmd_money(message: Message, services: Services) -> None:
+    month = datetime.now(services.settings.tz).strftime("%Y-%m")
     try:
-        rows = await _read_money(services)
+        raw = await services.github.get_text(MONEY_PATH)
     except GitHubError as exc:
         logger.error("money: %s", exc)
         await message.answer(exc.user_message)
         return
 
-    now = datetime.now(services.settings.tz)
-    month = now.strftime("%Y-%m")
-    month_rows = [row for row in rows if str(row.get("date", "")).startswith(month)]
+    await message.answer(render_money(parse_rows(raw), month), parse_mode="HTML")
 
-    if not month_rows:
-        await message.answer(f"💰 За {now:%m.%Y} записей нет.")
-        return
 
-    spent = sum(float(row["amount"]) for row in month_rows if row.get("kind") == "expense")
-    earned = sum(float(row["amount"]) for row in month_rows if row.get("kind") == "income")
-
-    by_category: dict[str, float] = {}
-    for row in month_rows:
-        if row.get("kind") != "expense":
-            continue
-        category = (row.get("category") or "Прочее").strip()
-        by_category[category] = by_category.get(category, 0.0) + float(row["amount"])
-
-    top = sorted(by_category.items(), key=lambda item: -item[1])[:3]
+def render_money(rows: list[dict], month: str) -> str:
+    """Краткая сводка за месяц. Битые суммы не роняют отчёт."""
+    summary = summarize(rows, month)
+    if summary.count == 0:
+        return f"💰 За {month_label(month)} записей нет."
 
     lines = [
-        f"💰 <b>За {now:%m.%Y}</b>",
+        f"💰 <b>За {month_label(month)}</b>",
         "",
-        f"Доход: <b>{_money(earned)} ₽</b>",
-        f"Расход: <b>{_money(spent)} ₽</b>",
-        f"Итого: <b>{_money(earned - spent)} ₽</b>",
+        f"Доход: <b>{_money(summary.income)} ₽</b>",
+        f"Расход: <b>{_money(summary.expense)} ₽</b>",
+        f"Итого: <b>{_money(summary.balance)} ₽</b>",
     ]
+
+    top = summary.expense_categories[:3]
     if top:
         lines.extend(["", "<b>Куда ушло</b>"])
         for category, amount in top:
             lines.append(f"• {html.escape(category)} — {_money(amount)} ₽")
 
-    await message.answer("\n".join(lines), parse_mode="HTML")
+    return "\n".join(lines)
 
 
 # ── Вспомогательное ──────────────────────────────────────────
@@ -257,13 +247,6 @@ async def _ask_for_input(message: Message, kind: str, prompt: str) -> None:
     sent = await message.answer(prompt, reply_markup=ForceReply(selective=True))
     if message.from_user is not None:
         PENDING[message.from_user.id] = (kind, sent.message_id)
-
-
-async def _read_money(services: Services) -> list[dict]:
-    raw = await services.github.get_text(MONEY_PATH)
-    if not raw.strip():
-        return []
-    return [row for row in csv.DictReader(io.StringIO(raw)) if row.get("date")]
 
 
 def _money(value: float) -> str:

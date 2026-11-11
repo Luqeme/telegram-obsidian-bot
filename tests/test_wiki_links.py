@@ -33,3 +33,19 @@ def test_ignores_short_titles() -> None:
 def test_empty_input_is_safe() -> None:
     assert wiki_link("", TARGETS) == ""
     assert wiki_link("текст", []) == "текст"
+
+
+def test_does_not_break_words() -> None:
+    """Ссылка не должна вставляться внутрь слова: «молокозавод» ≠ «молоко»."""
+    linked = wiki_link("Построили молокозавод.", [("Молоко 2026-11-04", "Молоко")])
+    assert linked == "Построили молокозавод."
+
+
+def test_links_standalone_word() -> None:
+    linked = wiki_link("Купил молоко.", [("Молоко 2026-11-04", "Молоко")])
+    assert "[[Молоко 2026-11-04|Молоко]]" in linked
+
+
+def test_links_word_before_punctuation() -> None:
+    linked = wiki_link("Нужен дашборд, срочно.", TARGETS)
+    assert "[[Дашборд 2026-11-04|Дашборд]]," in linked

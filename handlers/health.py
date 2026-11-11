@@ -81,7 +81,9 @@ async def build_weekly(services: Services) -> str:
         return ""
 
     now = datetime.now(services.settings.tz)
-    inbox = [note for note in notes if "00_Inbox" in note.folder]
+    inbox_dir = services.settings.obsidian_inbox_dir.strip("/")
+    prefix = f"{inbox_dir}/" if inbox_dir else ""
+    inbox = [note for note in notes if prefix and note.path.startswith(prefix)]
     if not inbox:
         return ""
 
@@ -99,10 +101,6 @@ async def build_weekly(services: Services) -> str:
     ]
     if stale:
         lines.append(f"Из них старше недели: <b>{len(stale)}</b>")
-
-    if len(inbox) == 0:
-        lines.append("")
-        lines.append("Всё разобрано.")
 
     return "\n".join(lines)
 

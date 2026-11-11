@@ -444,10 +444,7 @@ async def _process(
     except GitHubError as exc:
         logger.warning("Не удалось получить словарь тегов: %s", exc)
 
-    try:
-        _, project_context = await _index_context(services)
-    except GitHubError as exc:
-        logger.warning("Не удалось получить проекты: %s", exc)
+    _, project_context = await _index_context(services)
 
     try:
         money_categories = await services.index.money_categories()

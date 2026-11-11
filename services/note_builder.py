@@ -139,7 +139,9 @@ def wiki_link(text: str, targets: Sequence[tuple[str, str]]) -> str:
     for stem, title in ordered:
         if len(title) < 4 or f"[[{stem}|" in text:
             continue
-        pattern = re.compile(re.escape(title), re.IGNORECASE)
+        pattern = re.compile(
+            rf"(?<![\w-]){re.escape(title)}(?![\w-])", re.IGNORECASE
+        )
         if not pattern.search(text):
             continue
         text = pattern.sub(f"[[{stem}|{title}]]", text, count=1)
