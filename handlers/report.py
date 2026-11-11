@@ -16,6 +16,7 @@ from services import GitHubError, Services
 from services.money import (
     MONEY_PATH,
     MonthSummary,
+    format_rub,
     month_label,
     parse_rows,
     previous_month,
@@ -79,9 +80,9 @@ def render_report(rows: list[dict], month: str) -> str:
     lines = [
         f"📊 <b>Отчёт за {label}</b>",
         "",
-        f"Доход: <b>{_money(summary.income)} ₽</b>",
-        f"Расход: <b>{_money(summary.expense)} ₽</b>",
-        f"Остаток: <b>{_money(summary.balance)} ₽</b>",
+        f"Доход: <b>{format_rub(summary.income)} ₽</b>",
+        f"Расход: <b>{format_rub(summary.expense)} ₽</b>",
+        f"Остаток: <b>{format_rub(summary.balance)} ₽</b>",
         f"Операций: {summary.count}",
     ]
 
@@ -90,7 +91,7 @@ def render_report(rows: list[dict], month: str) -> str:
     if summary.income_categories:
         lines.extend(["", "<b>Доходы</b>"])
         for category, amount in summary.income_categories[:5]:
-            lines.append(f"• {html.escape(category)} — {_money(amount)} ₽")
+            lines.append(f"• {html.escape(category)} — {format_rub(amount)} ₽")
 
     if summary.top_expenses:
         lines.extend(["", "<b>Крупные траты</b>"])
@@ -98,7 +99,7 @@ def render_report(rows: list[dict], month: str) -> str:
             note = item["note"]
             suffix = f" · {html.escape(note[:60])}" if note else ""
             lines.append(
-                f"• {_money(item['amount'])} ₽ · "
+                f"• {format_rub(item['amount'])} ₽ · "
                 f"{html.escape(item['category'])}{suffix}"
             )
 
@@ -110,15 +111,11 @@ def render_report(rows: list[dict], month: str) -> str:
             [
                 "",
                 f"<i>Прошлый месяц ({month_label(previous.month)}): "
-                f"{_money(previous.expense)} ₽ · {sign}{abs(delta):.0f}%</i>",
+                f"{format_rub(previous.expense)} ₽ · {sign}{abs(delta):.0f}%</i>",
             ]
         )
 
     return "\n".join(lines)
-
-
-def _money(value: float) -> str:
-    return f"{value:,.0f}".replace(",", " ")
 
 
 def _category_lines(summary: MonthSummary) -> list[str]:
@@ -129,7 +126,7 @@ def _category_lines(summary: MonthSummary) -> list[str]:
     for category, amount in summary.expense_categories[:10]:
         share = amount / total * 100
         lines.append(
-            f"• {html.escape(category)} — {_money(amount)} ₽ ({share:.0f}%)"
+            f"• {html.escape(category)} — {format_rub(amount)} ₽ ({share:.0f}%)"
         )
     hidden = len(summary.expense_categories) - 10
     if hidden > 0:

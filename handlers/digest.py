@@ -61,6 +61,9 @@ async def cmd_today(message: Message, services: Services) -> None:
         lines.append(f"Просрочено: <b>{len(overdue)}</b>")
     if due_today:
         lines.append(f"На сегодня: <b>{len(due_today)}</b>")
+    if services.index.truncated:
+        indexed, total = services.index.truncated
+        lines.append(f"⚠️ В индексе <b>{indexed}</b> из {total} заметок")
 
     if today_notes:
         lines.extend(["", "<b>Новое</b>"])

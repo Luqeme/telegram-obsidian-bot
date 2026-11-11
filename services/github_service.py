@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import logging
+import tarfile
 from pathlib import PurePosixPath
 from urllib.parse import quote
 
@@ -21,6 +23,8 @@ logger = logging.getLogger(__name__)
 API_URL = "https://api.github.com"
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 FILE_TIMEOUT = httpx.Timeout(20.0, connect=10.0)
+ARCHIVE_TIMEOUT = httpx.Timeout(120.0, connect=15.0)
+MAX_ARCHIVE_BYTES = 25 * 1024 * 1024
 
 
 class GitHubError(RuntimeError):
@@ -33,6 +37,12 @@ class GitHubError(RuntimeError):
 
 class GitHubPathExists(GitHubError):
     """Файл с таким путём уже есть в ветке."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(
+            message,
+            "❌ Не удалось сохранить: файл с таким именем уже есть в хранилище.",
+        )
 
 
 def drop_last_lines(content: str, lines: list[str]) -> tuple[str, int]:
@@ -156,6 +166,85 @@ class GitHubService:
             for item in response.json().get("tree", [])
             if item.get("type") == "blob" and item["path"].endswith(".md")
         ]
+
+    async def branch_head(self) -> str:
+        """SHA последнего коммита в ветке — ключ для кэша снимка."""
+        url = f"{API_URL}/repos/{self._repo}/commits/{quote(self._branch, safe='')}"
+        try:
+            response = await self._client.get(
+                url, headers=self._headers, timeout=FILE_TIMEOUT
+            )
+        except httpx.HTTPError as exc:
+            raise GitHubError(
+                f"GitHub commits: {exc!r}",
+                "❌ Не удалось получить состояние ветки.",
+            ) from exc
+
+        if response.status_code != 200:
+            raise GitHubError(
+                f"GitHub commits: HTTP {response.status_code}",
+                "❌ Не удалось получить состояние ветки.",
+            )
+        return str(response.json().get("sha") or "")
+
+    async def download_snapshot(self) -> tuple[str, dict[str, str]]:
+        """Вся ветка одним архивом: (sha коммита, {путь: текст}).
+
+        Один запрос вместо сотни GET /contents: заметки читаются из tar.gz
+        в памяти, на диск ничего не распаковывается.
+        """
+        head = await self.branch_head()
+        url = f"{API_URL}/repos/{self._repo}/tarball/{quote(self._branch, safe='')}"
+
+        try:
+            response = await self._client.get(
+                url,
+                headers=self._headers,
+                timeout=ARCHIVE_TIMEOUT,
+                follow_redirects=True,
+            )
+        except httpx.HTTPError as exc:
+            raise GitHubError(
+                f"GitHub tarball: {exc!r}",
+                "❌ Не удалось скачать архив заметок.",
+            ) from exc
+
+        if response.status_code != 200:
+            raise GitHubError(
+                f"GitHub tarball: HTTP {response.status_code}",
+                "❌ Не удалось скачать архив заметок.",
+            )
+
+        archive = response.content
+        if len(archive) > MAX_ARCHIVE_BYTES:
+            raise GitHubError(
+                f"архив ветки слишком большой: {len(archive)} байт",
+                "❌ Хранилище слишком большое для одного запроса.",
+            )
+
+        return head, self._extract_markdown(archive)
+
+    @staticmethod
+    def _extract_markdown(archive: bytes) -> dict[str, str]:
+        """Достаёт .md из tar.gz GitHub, отбрасывая верхнюю папку архива."""
+        files: dict[str, str] = {}
+        try:
+            with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
+                for member in tar:
+                    if not member.isfile() or not member.name.endswith(".md"):
+                        continue
+                    handle = tar.extractfile(member)
+                    if handle is None:
+                        continue
+                    _, _, relative = member.name.partition("/")
+                    path = relative or member.name
+                    files[path] = handle.read().decode("utf-8", errors="replace")
+        except tarfile.TarError as exc:
+            raise GitHubError(
+                f"битый архив ветки: {exc!r}",
+                "❌ Не удалось прочитать архив заметок.",
+            ) from exc
+        return files
 
     async def replace_line(
         self, path: str, old_line: str, new_line: str, commit_message: str

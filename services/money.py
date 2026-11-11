@@ -56,6 +56,11 @@ def to_amount(value: object) -> float:
         return 0.0
 
 
+def format_rub(value: float) -> str:
+    """Сумма с пробелами между разрядами: 1234.0 -> '1 234'."""
+    return f"{value:,.0f}".replace(",", " ")
+
+
 def month_label(month: str) -> str:
     """'2026-10' -> 'октябрь 2026'."""
     year, number = (int(part) for part in month.split("-"))

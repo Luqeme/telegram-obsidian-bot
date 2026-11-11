@@ -27,7 +27,7 @@ DONE_RE = re.compile(r"✅\s*\d{4}-\d{2}-\d{2}")
 PRIORITY_MARKS = ("⏫", "🔼", "🔽")
 
 DEFAULT_TTL = 600
-MAX_FILES = 500
+MAX_FILES = 2000
 FETCH_CONCURRENCY = 6
 SKIP_NAMES = {"Dashboard.md", "Карта.md", "README.md"}
 SKIP_TYPES = {"project", "project-template", "money-categories"}
@@ -189,9 +189,15 @@ class NotesIndex:
         self._notes: list[NoteInfo] = []
         self._projects: list[NoteInfo] = []
         self._money_categories: list[str] = []
-        self._cache: dict[str, tuple[str, NoteInfo]] = {}
+        self._snapshot_sha: str | None = None
+        self._truncated: tuple[int, int] | None = None
         self._loaded_at = 0.0
         self._lock = asyncio.Lock()
+
+    @property
+    def truncated(self) -> tuple[int, int] | None:
+        """(проиндексировано, всего), если заметок больше MAX_FILES."""
+        return self._truncated
 
     # ── Загрузка ─────────────────────────────────────────────
 
@@ -205,47 +211,18 @@ class NotesIndex:
             if not force and self._notes and loop.time() - self._loaded_at < self._ttl:
                 return self._notes
 
-            blobs = [
-                (path, sha)
-                for path, sha in await self._github.list_markdown_blobs()
-                if PurePosixPath(path).name not in SKIP_NAMES
-                and not path.startswith(".")
-            ]
-            if len(blobs) > MAX_FILES:
-                logger.warning("Заметок %s, индексирую первые %s", len(blobs), MAX_FILES)
-                blobs = blobs[:MAX_FILES]
+            documents, commit = await self._fetch_documents()
+
+            # Ветка не менялась — пересобирать индекс незачем.
+            if documents is None:
+                self._loaded_at = loop.time()
+                return self._notes
 
             known: dict[str, NoteInfo] = {}
             projects: dict[str, NoteInfo] = {}
             money_categories: list[str] = []
-            to_fetch: list[tuple[str, str]] = []
-            for path, sha in blobs:
-                cached = self._cache.get(path)
-                if cached is not None and cached[0] == sha:
-                    if cached[1].note_type == "project":
-                        projects[path] = cached[1]
-                    elif cached[1].note_type == "money-categories":
-                        money_categories = parse_money_categories(cached[1].text)
-                    elif cached[1].note_type not in SKIP_TYPES:
-                        known[path] = cached[1]
-                else:
-                    to_fetch.append((path, sha))
-
-            semaphore = asyncio.Semaphore(FETCH_CONCURRENCY)
-
-            async def load_one(path: str, sha: str) -> tuple[str, str, NoteInfo | None]:
-                async with semaphore:
-                    try:
-                        raw = await self._github.get_text(path)
-                    except GitHubError as exc:
-                        logger.warning("Не прочитал %s: %s", path, exc)
-                        return path, sha, None
-                return path, sha, parse_note(path, raw) if raw else None
-
-            loaded = await asyncio.gather(
-                *(load_one(path, sha) for path, sha in to_fetch)
-            )
-            for path, sha, note in loaded:
+            for path, raw in documents.items():
+                note = parse_note(path, raw) if raw else None
                 if note is None:
                     continue
                 if note.note_type == "project":
@@ -254,22 +231,81 @@ class NotesIndex:
                     money_categories = parse_money_categories(note.text)
                 elif note.note_type not in SKIP_TYPES:
                     known[path] = note
-                self._cache[path] = (sha, note)
 
-            current = {path for path, _ in blobs}
-            self._cache = {
-                path: value for path, value in self._cache.items() if path in current
-            }
-            self._notes = [known[path] for path, _ in blobs if path in known]
-            self._projects = [
-                projects[path] for path, _ in blobs if path in projects
-            ]
+            self._notes = [known[path] for path in documents if path in known]
+            self._projects = [projects[path] for path in documents if path in projects]
             self._money_categories = money_categories
+            self._snapshot_sha = commit
             self._loaded_at = loop.time()
-            logger.info(
-                "Индекс заметок: %s всего, %s обновлено", len(self._notes), len(to_fetch)
-            )
+            logger.info("Индекс заметок: %s файлов", len(documents))
             return self._notes
+
+    async def _fetch_documents(self) -> tuple[dict[str, str] | None, str | None]:
+        """(путь -> текст, sha коммита). None вместо словаря — ветка не менялась."""
+        head_reader = getattr(self._github, "branch_head", None)
+        if head_reader is not None:
+            try:
+                head = await head_reader()
+            except GitHubError as exc:
+                logger.warning("Не удалось узнать состояние ветки: %s", exc)
+                head = ""
+            if head and head == self._snapshot_sha and self._notes:
+                return None, head
+
+        loader = getattr(self._github, "download_snapshot", None)
+        if loader is not None:
+            try:
+                commit, files = await loader()
+            except GitHubError as exc:
+                logger.warning("Архив ветки недоступен, читаю по файлам: %s", exc)
+            else:
+                filtered = {
+                    path: raw for path, raw in files.items() if not self._skip(path)
+                }
+                return self._limit(filtered), commit
+
+        blobs = [
+            (path, sha)
+            for path, sha in await self._github.list_markdown_blobs()
+            if not self._skip(path)
+        ]
+        blobs = self._limit(blobs)
+        semaphore = asyncio.Semaphore(FETCH_CONCURRENCY)
+
+        async def load_one(path: str) -> tuple[str, str]:
+            async with semaphore:
+                try:
+                    return path, await self._github.get_text(path)
+                except GitHubError as exc:
+                    logger.warning("Не прочитал %s: %s", path, exc)
+                    return path, ""
+
+        loaded = await asyncio.gather(*(load_one(path) for path, _ in blobs))
+        return {path: raw for path, raw in loaded if raw}, None
+
+    @staticmethod
+    def _skip(path: str) -> bool:
+        pure = PurePosixPath(path)
+        if pure.name in SKIP_NAMES:
+            return True
+        return any(part.startswith(".") for part in pure.parts)
+
+    def _limit(self, items):
+        """Обрезает список/словарь до MAX_FILES и запоминает факт обрезки."""
+        total = len(items)
+        if total <= MAX_FILES:
+            self._truncated = None
+            return items
+
+        self._truncated = (MAX_FILES, total)
+        logger.warning(
+            "Заметок %s, индексирую первые %s — остальные не попадут в поиск",
+            total,
+            MAX_FILES,
+        )
+        if isinstance(items, dict):
+            return dict(list(items.items())[:MAX_FILES])
+        return items[:MAX_FILES]
 
     def invalidate(self) -> None:
         self._loaded_at = 0.0

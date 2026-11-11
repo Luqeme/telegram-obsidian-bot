@@ -12,7 +12,7 @@ from aiogram.filters import Command, CommandStart, Filter
 from aiogram.types import ForceReply, Message
 
 from services import GitHubError, GroqError, Services
-from services.money import MONEY_PATH, month_label, parse_rows, summarize
+from services.money import MONEY_PATH, format_rub, month_label, parse_rows, summarize
 
 router = Router(name="base")
 logger = logging.getLogger(__name__)
@@ -118,7 +118,16 @@ async def _run_find(message: Message, services: Services, query: str) -> None:
         return
 
     if not found:
-        await message.answer(f"🔎 По запросу «{html.escape(query)}» ничего не нашлось.")
+        hint = ""
+        if services.index.truncated:
+            indexed, total = services.index.truncated
+            hint = (
+                f"\n\n⚠️ Проиндексировано {indexed} из {total} заметок — "
+                "возможно, нужная заметка за пределами индекса."
+            )
+        await message.answer(
+            f"🔎 По запросу «{html.escape(query)}» ничего не нашлось.{hint}"
+        )
         return
 
     lines = [f"🔎 <b>Найдено: {len(found)}</b>", ""]
@@ -222,16 +231,16 @@ def render_money(rows: list[dict], month: str) -> str:
     lines = [
         f"💰 <b>За {month_label(month)}</b>",
         "",
-        f"Доход: <b>{_money(summary.income)} ₽</b>",
-        f"Расход: <b>{_money(summary.expense)} ₽</b>",
-        f"Итого: <b>{_money(summary.balance)} ₽</b>",
+        f"Доход: <b>{format_rub(summary.income)} ₽</b>",
+        f"Расход: <b>{format_rub(summary.expense)} ₽</b>",
+        f"Итого: <b>{format_rub(summary.balance)} ₽</b>",
     ]
 
     top = summary.expense_categories[:3]
     if top:
         lines.extend(["", "<b>Куда ушло</b>"])
         for category, amount in top:
-            lines.append(f"• {html.escape(category)} — {_money(amount)} ₽")
+            lines.append(f"• {html.escape(category)} — {format_rub(amount)} ₽")
 
     return "\n".join(lines)
 
@@ -247,10 +256,6 @@ async def _ask_for_input(message: Message, kind: str, prompt: str) -> None:
     sent = await message.answer(prompt, reply_markup=ForceReply(selective=True))
     if message.from_user is not None:
         PENDING[message.from_user.id] = (kind, sent.message_id)
-
-
-def _money(value: float) -> str:
-    return f"{value:,.0f}".replace(",", " ")
 
 
 BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.S)
