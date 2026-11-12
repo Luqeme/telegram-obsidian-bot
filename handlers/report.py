@@ -228,7 +228,7 @@ async def _send_month_widget(
                 services.settings.telegram_bot_token,
                 chat_id,
                 markup,
-                report_caption(summary, month),
+                report_caption(month),
             )
             if ok:
                 logger.info("report_widget month=%s", month)
@@ -255,7 +255,7 @@ async def _send_year_widget(
             services.settings.telegram_bot_token,
             chat_id,
             markup,
-            year_caption(rows, year),
+            year_caption(year),
         )
         if ok:
             logger.info("report_widget year=%s", year)

@@ -83,20 +83,17 @@ def test_year_widget_contains_months_and_fits() -> None:
     assert markup
     assert "окт" in markup
     assert compressed_size(markup) <= MAX_COMPRESSED
-    assert "90 000" in year_caption(ROWS, 2026)
+    assert year_caption(2026) == "📊 Отчёт за 2026 год"
 
 
 def test_year_widget_empty_year() -> None:
     assert build_year_widget(ROWS, 2025) == ""
 
 
-def test_caption_contains_month_and_totals() -> None:
-    summary = summarize(ROWS, "2026-10")
-    caption = report_caption(summary, "2026-10")
+def test_caption_is_short() -> None:
+    caption = report_caption("2026-10")
 
-    assert "октябрь 2026" in caption
-    assert "27 000" in caption
-    assert "90 000" in caption
+    assert caption == "📊 Отчёт за октябрь 2026"
 
 
 def test_send_widget_payload() -> None:

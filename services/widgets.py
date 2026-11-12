@@ -13,7 +13,6 @@ WIDGET_URL = "https://api.telegram.org/bot{token}/sendWidget"
 WIDGET_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 MAX_COMPRESSED = 4096
 MAX_CATEGORIES = 6
-MAX_EXPENSES = 3
 MONTH_SHORT = (
     "янв",
     "фев",
@@ -48,12 +47,6 @@ def build_report_widget(summary: MonthSummary, month: str) -> str:
     if not bars:
         bars.append('<div class="empty">Расходов нет.</div>')
 
-    expenses = "".join(
-        f'<div class="e"><b>{format_rub(item["amount"])} ₽</b> '
-        f'{html.escape(item["category"])}</div>'
-        for item in summary.top_expenses[:MAX_EXPENSES]
-    )
-
     markup = f"""
 <div class="w">
   <div class="totals">
@@ -62,7 +55,6 @@ def build_report_widget(summary: MonthSummary, month: str) -> str:
     <div><span>Остаток</span><b>{format_rub(summary.balance)} ₽</b></div>
   </div>
   <div class="bars">{''.join(bars)}</div>
-  {f'<div class="top">{expenses}</div>' if expenses else ''}
 </div>
 <style>
 .w{{font:14px system-ui,sans-serif;color:var(--tg-theme-text-color);padding:4px 2px}}
@@ -74,9 +66,6 @@ def build_report_widget(summary: MonthSummary, month: str) -> str:
 .t{{flex:1;height:8px;border-radius:4px;background:var(--tg-theme-secondary-bg-color);overflow:hidden}}
 .t i{{display:block;height:100%;border-radius:4px;background:var(--tg-theme-button-color)}}
 .v{{width:68px;text-align:right;font-size:12px;color:var(--tg-theme-hint-color)}}
-.top{{margin-top:12px;padding-top:8px;border-top:1px solid var(--tg-theme-section-separator-color)}}
-.e{{font-size:12px;color:var(--tg-theme-hint-color);margin:4px 0}}
-.e b{{color:var(--tg-theme-text-color)}}
 .empty{{color:var(--tg-theme-hint-color);font-size:13px}}
 </style>
 """
@@ -85,12 +74,8 @@ def build_report_widget(summary: MonthSummary, month: str) -> str:
     return markup
 
 
-def report_caption(summary: MonthSummary, month: str) -> str:
-    return (
-        f"📊 Отчёт за {month_label(month)} · "
-        f"расход {format_rub(summary.expense)} ₽ · "
-        f"доход {format_rub(summary.income)} ₽"
-    )
+def report_caption(month: str) -> str:
+    return f"📊 Отчёт за {month_label(month)}"
 
 
 def build_year_widget(rows: list[dict], year: int) -> str:
@@ -138,16 +123,8 @@ def build_year_widget(rows: list[dict], year: int) -> str:
     return markup
 
 
-def year_caption(
-    rows: list[dict], year: int
-) -> str:
-    months = [summarize(rows, f"{year}-{number:02d}") for number in range(1, 13)]
-    income = sum(item.income for item in months)
-    expense = sum(item.expense for item in months)
-    return (
-        f"📊 Отчёт за {year} год · расход {format_rub(expense)} ₽ · "
-        f"доход {format_rub(income)} ₽"
-    )
+def year_caption(year: int) -> str:
+    return f"📊 Отчёт за {year} год"
 
 
 async def send_widget(
