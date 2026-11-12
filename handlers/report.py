@@ -22,6 +22,7 @@ from services.money import (
     previous_month,
     summarize,
 )
+from services.widgets import build_report_widget, report_caption, send_widget
 
 router = Router(name="report")
 logger = logging.getLogger(__name__)
@@ -31,11 +32,15 @@ logger = logging.getLogger(__name__)
 async def cmd_report(message: Message, services: Services) -> None:
     month = datetime.now(services.settings.tz).strftime("%Y-%m")
     argument = (message.text or "").partition(" ")[2].strip()
+    force_text = argument.casefold() in {"text", "текст"}
+    if force_text:
+        argument = ""
     if argument:
         month = _parse_month(argument)
         if month is None:
             await message.answer(
-                "Формат: <code>/report 2026-10</code> — год и месяц через дефис.",
+                "Формат: <code>/report 2026-10</code> — год и месяц через дефис. "
+                "Или <code>/report text</code> — обычный текст.",
                 parse_mode="HTML",
             )
             return
@@ -46,6 +51,21 @@ async def cmd_report(message: Message, services: Services) -> None:
         logger.error("report: %s", exc)
         await message.answer(exc.user_message)
         return
+
+    summary = summarize(rows, month)
+    if not force_text and summary.count:
+        markup = build_report_widget(summary, month)
+        if markup:
+            ok, reason = await send_widget(
+                services.settings.telegram_bot_token,
+                message.chat.id,
+                markup,
+                report_caption(summary, month),
+            )
+            if ok:
+                logger.info("report_widget month=%s", month)
+                return
+            logger.warning("report_widget: %s", reason)
 
     await message.answer(render_report(rows, month), parse_mode="HTML")
 
