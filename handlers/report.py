@@ -186,6 +186,7 @@ async def report_loop(bot: Bot, services: Services) -> None:
 async def _send_report(
     message: Message, services: Services, view: str
 ) -> None:
+    logger.info("report send view=%r chat=%s", view, message.chat.id)
     try:
         rows = await _read_money(services)
     except GitHubError as exc:

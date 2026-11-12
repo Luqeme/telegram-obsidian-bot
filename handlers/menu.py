@@ -32,6 +32,11 @@ async def cmd_menu(message: Message) -> None:
 async def on_menu(callback: CallbackQuery, services: Services) -> None:
     action = (callback.data or "").partition(":")[2]
     message = callback.message
+    logger.info(
+        "menu action=%r message=%s",
+        action,
+        type(message).__name__,
+    )
     if not isinstance(message, Message):
         await callback.answer()
         return
