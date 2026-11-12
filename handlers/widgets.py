@@ -27,7 +27,6 @@ async def on_widget_query(query: WidgetQuery, services: Services) -> None:
             await _close_task(services, token, query, data[5:])
             return
 
-        logger.info("widget_query data=%r", data[:300])
         await answer_widget_query(token, query.id, "unknown")
     except Exception:  # noqa: BLE001 - виджет не должен зависать
         logger.exception("widget_query не обработан")
