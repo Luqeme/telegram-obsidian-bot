@@ -81,6 +81,7 @@ async def cmd_today(message: Message, services: Services) -> None:
             "text": task.text,
             "due": task.due,
             "icon": "⏳" if task.id in overdue_ids else "📅" if task.id in due_ids else "•",
+            "id": task.id,
         }
         for task in ordered[:MAX_BUTTONS]
     ]
@@ -136,7 +137,7 @@ async def cmd_today(message: Message, services: Services) -> None:
             message.chat.id,
             markup,
             f"📅 Сегодня, {now:%d.%m}",
-            reply_markup=keyboard.model_dump(exclude_none=True) if keyboard else None,
+            allow_queries=True,
         )
         if ok:
             return

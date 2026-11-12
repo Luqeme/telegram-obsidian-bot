@@ -22,8 +22,10 @@ from handlers import health as health_handlers
 from handlers import menu as menu_handlers
 from handlers import notes as notes_handlers
 from handlers import report as report_handlers
+from handlers import widgets as widget_handlers
 from middlewares.auth import AllowedUsersMiddleware
 from services import GitHubService, GroqService, NotesIndex, Services
+from services.widget_shim import install_widget_shim
 
 logger = logging.getLogger("bot")
 
@@ -123,6 +125,9 @@ async def main() -> int:
         dispatcher.include_router(notes_handlers.router)
         dispatcher.errors.register(on_error)
 
+        widget_observer = install_widget_shim(dispatcher)
+        widget_observer.register(widget_handlers.on_widget_query)
+
         background: list[asyncio.Task] = []
 
         try:
@@ -165,9 +170,10 @@ async def main() -> int:
                     asyncio.create_task(report_handlers.report_loop(bot, services))
                 )
 
-            await dispatcher.start_polling(
-                bot, allowed_updates=dispatcher.resolve_used_update_types()
-            )
+            allowed_updates = dispatcher.resolve_used_update_types()
+            if "widget_query" not in allowed_updates:
+                allowed_updates.append("widget_query")
+            await dispatcher.start_polling(bot, allowed_updates=allowed_updates)
         finally:
             for task in background:
                 task.cancel()

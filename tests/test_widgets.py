@@ -129,6 +129,19 @@ def test_weekly_widget_contains_review() -> None:
     assert weekly_caption(review) == "🗓 Итоги недели · 06.11–12.11"
 
 
+def test_today_widget_has_done_button() -> None:
+    markup = build_today_widget(
+        notes_today=1,
+        inbox=0,
+        open_tasks=1,
+        overdue=0,
+        due_today=0,
+        tasks=[{"text": "Купить молоко", "due": "", "icon": "•", "id": "abc123"}],
+    )
+
+    assert "TelegramWidget.request('done:abc123')" in markup
+
+
 def test_year_widget_contains_months_and_fits() -> None:
     markup = build_year_widget(ROWS, 2026)
 
@@ -167,6 +180,7 @@ def test_send_widget_payload() -> None:
                 "<div>hi</div>",
                 "caption",
                 reply_markup={"inline_keyboard": [[{"text": "x", "callback_data": "t:1"}]]},
+                allow_queries=True,
                 client=client,
             )
         finally:
@@ -178,6 +192,7 @@ def test_send_widget_payload() -> None:
     assert requests and requests[0].url.path.endswith("/sendWidget")
     payload = json.loads(requests[0].content)
     assert payload["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == "t:1"
+    assert payload["allow_queries"] is True
 
 
 def test_send_widget_reports_error() -> None:

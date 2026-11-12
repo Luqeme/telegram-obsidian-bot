@@ -97,9 +97,17 @@ def build_today_widget(
         text = task.get("text", "")
         if len(text) > 70:
             text = text[:69].rstrip() + "…"
+        task_id = str(task.get("id", ""))
+        button = ""
+        if task_id:
+            button = (
+                '<button class="b" onclick="this.disabled=true;'
+                f"TelegramWidget.request('done:{html.escape(task_id)}')"
+                '.catch(()=>{this.disabled=false})">✓</button>'
+            )
         rows.append(
             f'<div class="task"><span class="i">{icon}</span>'
-            f'<span class="x">{html.escape(text)}</span>'
+            f'<span class="x">{html.escape(text)}</span>{button}'
             f'<span class="d">{due_text}</span></div>'
         )
     if not rows:
@@ -136,6 +144,7 @@ def build_today_widget(
 .i{{width:16px}}
 .x{{flex:1;font-size:13px}}
 .d{{font-size:11px;color:var(--tg-theme-hint-color)}}
+.b{{border:0;border-radius:6px;padding:2px 8px;background:var(--tg-theme-button-color);color:var(--tg-theme-button-text-color);font-size:12px}}
 .empty{{font-size:13px;color:var(--tg-theme-hint-color)}}
 </style>
 """
@@ -290,12 +299,15 @@ async def send_widget(
     caption: str,
     *,
     reply_markup: dict | None = None,
+    allow_queries: bool = False,
     client: httpx.AsyncClient | None = None,
 ) -> tuple[bool, str]:
     """Отправляет виджет сырым Bot API. Возвращает (успех, причина ошибки)."""
     payload: dict = {"chat_id": chat_id, "html": markup, "caption": caption}
     if reply_markup:
         payload["reply_markup"] = reply_markup
+    if allow_queries:
+        payload["allow_queries"] = True
     own = client is None
     client = client or httpx.AsyncClient(timeout=WIDGET_TIMEOUT)
     try:
