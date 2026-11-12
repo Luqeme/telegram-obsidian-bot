@@ -630,7 +630,7 @@ async def _project_keyboard(
 
     buttons.append(
         InlineKeyboardButton(
-            text="📥 Оставить", callback_data=f"proj:{token}:none"
+            text="Готово", callback_data=f"proj:{token}:none"
         )
     )
     rows = [buttons[index : index + 2] for index in range(0, len(buttons), 2)]
@@ -798,7 +798,7 @@ async def on_project_choice(callback: CallbackQuery, services: Services) -> None
 
     if choice == "none":
         _PROJECT_NOTES.pop(token, None)
-        await callback.answer("Оставил как есть")
+        await callback.answer("Готово")
         await _clear_markup(message)
         return
 
