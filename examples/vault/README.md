@@ -36,7 +36,7 @@ cp -r examples/vault/* /path/to/your-vault/
 Проект — файл-хаб в `20_Projects` с полем `type: project`. Заметка привязывается к нему одной строкой:
 
 ```yaml
-up: "[[Дашборд]]"
+up: "[[Dashboard]]"
 ```
 
 Хаб сам собирает свои заметки и открытые задачи; в графе Obsidian появляется иерархия «хаб → заметки». Скопируй `99_Templates/Проект.md`, замени `type: project-template` на `type: project` — и новый хаб готов.
