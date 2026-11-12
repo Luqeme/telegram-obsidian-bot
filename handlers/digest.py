@@ -132,11 +132,15 @@ async def collect_today(services: Services) -> dict:
     }
 
 
-def build_today_state(data: dict) -> dict:
+def build_today_state(data: dict, offset: int = 0) -> dict:
+    ordered = data["ordered"]
+    offset = max(0, offset)
+    if offset >= len(ordered):
+        offset = 0
     overdue_ids = {task.id for task in data["overdue"]}
     due_ids = {task.id for task in data["due_today"]}
     tasks = []
-    for task in data["ordered"][:STATE_TASKS]:
+    for task in ordered[offset : offset + STATE_TASKS]:
         due = task.due or ""
         text = task.text
         if len(text) > STATE_TEXT:
@@ -164,6 +168,8 @@ def build_today_state(data: dict) -> dict:
         "du": len(data["due_today"]),
         "m": " · ".join(parts),
         "t": tasks,
+        "off": offset,
+        "tot": len(ordered),
     }
 
     # chat_data ограничен 1024 байтами: убираем задачи, пока не влезем.

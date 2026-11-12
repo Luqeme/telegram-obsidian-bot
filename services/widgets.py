@@ -84,15 +84,17 @@ def build_today_widget() -> str:
 <script>
 const root = document.getElementById('w');
 let last = null;
+let open = null;
 function esc(v) { const d = document.createElement('div'); d.textContent = String(v ?? ''); return d.innerHTML; }
-function render() {
+function render(force) {
   let s = {};
   const raw = TelegramWidget.chatData;
   if (!raw) {
     root.textContent = 'Загрузка…';
     return;
   }
-  if (raw === last) return;
+  if (!force && raw === last) return;
+  if (raw !== last) open = null;
   last = raw;
   if (typeof raw === 'object') {
     s = raw;
@@ -109,24 +111,54 @@ function render() {
   if (tasks.length) {
     for (const t of tasks) {
       h += '<div class="task"><span class="i">' + esc(t.k || '\u2022') + '</span><span class="x">' + esc(t.x) + '</span>';
-      if (t.i) h += '<button class="b" data-id="' + esc(t.i) + '">\u2713</button>';
-      h += '<span class="d">' + esc(t.d || '') + '</span></div>';
+      if (t.d) h += '<span class="d">' + esc(t.d) + '</span>';
+      if (t.i) h += '<button class="b" data-act="done" data-id="' + esc(t.i) + '">\u2713</button>';
+      if (t.i) h += '<button class="b more" data-act="open" data-id="' + esc(t.i) + '">\u22ef</button>';
+      h += '</div>';
+      if (t.i && open === t.i) {
+        h += '<div class="acts">';
+        h += '<button class="b" data-act="due" data-id="' + esc(t.i) + '" data-mode="tomorrow">Завтра</button>';
+        h += '<button class="b" data-act="due" data-id="' + esc(t.i) + '" data-mode="plus3">+3 дня</button>';
+        h += '<button class="b" data-act="due" data-id="' + esc(t.i) + '" data-mode="clear">Без даты</button>';
+        h += '</div>';
+      }
     }
   } else {
     h += '<div class="empty">Открытых задач нет.</div>';
   }
   h += '</div>';
+  const off = s.off || 0;
+  const total = s.tot || tasks.length;
+  if (off > 0 || off + tasks.length < total) {
+    h += '<div class="pager">';
+    if (off > 0) h += '<button class="b" data-act="prev" data-off="' + Math.max(0, off - 5) + '">\u2190 Назад</button>';
+    if (off + tasks.length < total) h += '<button class="b" data-act="more" data-off="' + (off + tasks.length) + '">Ещё \u2192</button>';
+    h += '</div>';
+  }
   root.innerHTML = h;
 }
 root.addEventListener('click', (e) => {
-  const id = e.target && e.target.dataset ? e.target.dataset.id : null;
-  if (!id) return;
-  e.target.disabled = true;
-  TelegramWidget.request('done:' + id).catch(() => { e.target.disabled = false; });
+  const el = e.target;
+  if (!el || !el.dataset) return;
+  const act = el.dataset.act;
+  if (!act) return;
+  if (act === 'open') {
+    open = open === el.dataset.id ? null : el.dataset.id;
+    render(true);
+    return;
+  }
+  let data = null;
+  if (act === 'done') data = 'done:' + el.dataset.id;
+  else if (act === 'due') data = 'due:' + el.dataset.id + ':' + el.dataset.mode;
+  else if (act === 'more') data = 'more:' + el.dataset.off;
+  else if (act === 'prev') data = 'prev:' + el.dataset.off;
+  if (!data) return;
+  el.disabled = true;
+  TelegramWidget.request(data).catch(() => { el.disabled = false; });
 });
-try { TelegramWidget.onEvent('chatDataChanged', render); } catch (e) {}
-render();
-setInterval(render, 1500);
+try { TelegramWidget.onEvent('chatDataChanged', () => render(false)); } catch (e) {}
+render(false);
+setInterval(() => render(false), 1500);
 </script>
 <style>
 .w{font:14px system-ui,sans-serif;color:var(--tg-theme-text-color);padding:4px 2px}
@@ -134,11 +166,16 @@ setInterval(render, 1500);
 .stats div{flex:1}
 .stats span{display:block;color:var(--tg-theme-hint-color);font-size:11px}
 .date{font-size:12px;color:var(--tg-theme-hint-color);margin-bottom:10px}
-.task{display:flex;align-items:baseline;gap:6px;margin:5px 0}
+.task{display:flex;align-items:center;gap:6px;margin:5px 0}
 .i{width:16px}
 .x{flex:1;font-size:13px}
 .d{font-size:11px;color:var(--tg-theme-hint-color)}
-.b{border:0;border-radius:6px;padding:2px 8px;background:var(--tg-theme-button-color);color:var(--tg-theme-button-text-color);font-size:12px}
+.b{border:0;border-radius:6px;padding:3px 8px;background:var(--tg-theme-button-color);color:var(--tg-theme-button-text-color);font-size:12px}
+.b.more{background:var(--tg-theme-secondary-bg-color);color:var(--tg-theme-hint-color);padding:3px 7px}
+.acts{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px 22px}
+.acts .b{background:var(--tg-theme-secondary-bg-color);color:var(--tg-theme-text-color);font-size:11px}
+.pager{display:flex;gap:6px;margin-top:10px}
+.pager .b{background:var(--tg-theme-secondary-bg-color);color:var(--tg-theme-text-color);font-size:11px}
 .empty{font-size:13px;color:var(--tg-theme-hint-color)}
 </style>
 """

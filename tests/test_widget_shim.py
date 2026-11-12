@@ -280,3 +280,243 @@ def test_handler_switches_report_period() -> None:
     assert calls["answer"] == ("token", "q1", "ok")
     assert edits == [("token", 2, 10, json.dumps({"k": "m", "v": "mon:2026-10"}))]
 
+
+def _task_query(data: str) -> WidgetQuery:
+    return WidgetQuery.model_validate(
+        {
+            "id": "q1",
+            "from": {"id": 2, "is_bot": False, "first_name": "A"},
+            "data": data,
+            "chat": {"id": 2, "type": "private"},
+            "message_id": 10,
+        }
+    )
+
+
+def test_handler_moves_task_to_tomorrow() -> None:
+    import zoneinfo
+
+    from handlers import widgets as widget_handlers
+
+    calls: dict[str, object] = {}
+    edits: list[tuple] = []
+
+    class FakeTask:
+        id = "abc"
+        raw = "Купить молоко 📅 2026-11-10"
+        text = "Купить молоко"
+
+        class note:
+            path = "Tasks.md"
+
+    class FakeIndex:
+        invalidated = False
+
+        async def find_task(self, task_id: str):
+            return FakeTask() if task_id == "abc" else None
+
+        def invalidate(self) -> None:
+            self.invalidated = True
+
+    class FakeGithub:
+        async def replace_line(self, old_path, old_line, new_line, message) -> bool:
+            calls["replace"] = (old_path, old_line, new_line)
+            return True
+
+    async def fake_collect(_services) -> dict:
+        return {"stub": True}
+
+    def fake_state(_data, offset=0) -> dict:
+        calls["offset"] = offset
+        return {"t": [], "off": offset}
+
+    async def fake_answer(token, query_id, data="", **kwargs) -> bool:
+        calls["answer"] = data
+        return True
+
+    async def fake_edit(token, chat_id, message_id, chat_data, **kwargs) -> bool:
+        edits.append(chat_data)
+        return True
+
+    services = type(
+        "S",
+        (),
+        {
+            "settings": type(
+                "Settings",
+                (),
+                {
+                    "telegram_bot_token": "token",
+                    "allowed_user_ids": [2],
+                    "tz": zoneinfo.ZoneInfo("UTC"),
+                },
+            )(),
+            "index": FakeIndex(),
+            "github": FakeGithub(),
+        },
+    )()
+
+    names = (
+        "collect_today",
+        "build_today_state",
+        "answer_widget_query",
+        "edit_widget_data",
+    )
+    originals = {name: getattr(widget_handlers, name) for name in names}
+    widget_handlers.collect_today = fake_collect
+    widget_handlers.build_today_state = fake_state
+    widget_handlers.answer_widget_query = fake_answer
+    widget_handlers.edit_widget_data = fake_edit
+    try:
+        asyncio.run(
+            widget_handlers.on_widget_query(_task_query("due:abc:tomorrow"), services)
+        )
+    finally:
+        for name, value in originals.items():
+            setattr(widget_handlers, name, value)
+
+    assert calls["answer"] == "ok"
+    assert services.index.invalidated is True
+    path, old_line, new_line = calls["replace"]
+    assert path == "Tasks.md"
+    assert old_line == "- [ ] Купить молоко 📅 2026-11-10"
+    assert new_line.startswith("- [ ] Купить молоко 📅 ")
+    assert new_line != old_line
+    assert edits
+
+
+def test_handler_clears_task_due() -> None:
+    import zoneinfo
+
+    from handlers import widgets as widget_handlers
+
+    calls: dict[str, object] = {}
+
+    class FakeTask:
+        id = "abc"
+        raw = "Позвонить 📅 2026-11-10"
+        text = "Позвонить"
+
+        class note:
+            path = "Tasks.md"
+
+    class FakeIndex:
+        async def find_task(self, task_id: str):
+            return FakeTask()
+
+        def invalidate(self) -> None:
+            pass
+
+    class FakeGithub:
+        async def replace_line(self, old_path, old_line, new_line, message) -> bool:
+            calls["new_line"] = new_line
+            return True
+
+    async def fake_answer(token, query_id, data="", **kwargs) -> bool:
+        calls["answer"] = data
+        return True
+
+    async def fake_collect(_services) -> dict:
+        return {"stub": True}
+
+    def fake_state(_data, offset=0) -> dict:
+        return {"t": []}
+
+    async def fake_edit(*args, **kwargs) -> bool:
+        return True
+
+    services = type(
+        "S",
+        (),
+        {
+            "settings": type(
+                "Settings",
+                (),
+                {
+                    "telegram_bot_token": "token",
+                    "allowed_user_ids": [2],
+                    "tz": zoneinfo.ZoneInfo("UTC"),
+                },
+            )(),
+            "index": FakeIndex(),
+            "github": FakeGithub(),
+        },
+    )()
+
+    names = (
+        "collect_today",
+        "build_today_state",
+        "answer_widget_query",
+        "edit_widget_data",
+    )
+    originals = {name: getattr(widget_handlers, name) for name in names}
+    widget_handlers.collect_today = fake_collect
+    widget_handlers.build_today_state = fake_state
+    widget_handlers.answer_widget_query = fake_answer
+    widget_handlers.edit_widget_data = fake_edit
+    try:
+        asyncio.run(
+            widget_handlers.on_widget_query(_task_query("due:abc:clear"), services)
+        )
+    finally:
+        for name, value in originals.items():
+            setattr(widget_handlers, name, value)
+
+    assert calls["answer"] == "ok"
+    assert calls["new_line"] == "- [ ] Позвонить"
+
+
+def test_handler_pages_today_tasks() -> None:
+    import zoneinfo
+
+    from handlers import widgets as widget_handlers
+
+    calls: dict[str, object] = {}
+
+    async def fake_collect(_services) -> dict:
+        return {"stub": True}
+
+    def fake_state(_data, offset=0) -> dict:
+        calls["offset"] = offset
+        return {"off": offset, "t": []}
+
+    async def fake_answer(token, query_id, data="", **kwargs) -> bool:
+        calls["answer"] = data
+        return True
+
+    async def fake_edit(token, chat_id, message_id, chat_data, **kwargs) -> bool:
+        calls["edit"] = chat_data
+        return True
+
+    services = type(
+        "S",
+        (),
+        {
+            "settings": type(
+                "Settings",
+                (),
+                {
+                    "telegram_bot_token": "token",
+                    "allowed_user_ids": [2],
+                    "tz": zoneinfo.ZoneInfo("UTC"),
+                },
+            )(),
+        },
+    )()
+
+    names = ("collect_today", "build_today_state", "answer_widget_query", "edit_widget_data")
+    originals = {name: getattr(widget_handlers, name) for name in names}
+    widget_handlers.collect_today = fake_collect
+    widget_handlers.build_today_state = fake_state
+    widget_handlers.answer_widget_query = fake_answer
+    widget_handlers.edit_widget_data = fake_edit
+    try:
+        asyncio.run(widget_handlers.on_widget_query(_task_query("more:5"), services))
+    finally:
+        for name, value in originals.items():
+            setattr(widget_handlers, name, value)
+
+    assert calls["offset"] == 5
+    assert calls["answer"] == "ok"
+    assert json.loads(calls["edit"])["off"] == 5
+

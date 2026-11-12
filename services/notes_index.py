@@ -85,6 +85,14 @@ def task_due(raw: str) -> str:
     return match.group(1) if match else ""
 
 
+def with_due(raw: str, due: str | None) -> str:
+    """Ставит или убирает дату 📅 в строке задачи, сохраняя остальной текст."""
+    text = " ".join(DUE_RE.sub("", raw).split())
+    if due:
+        return f"{text} 📅 {due}"
+    return text
+
+
 def task_id(path: str, raw: str) -> str:
     return hashlib.sha1(f"{path}\n{raw}".encode("utf-8")).hexdigest()[:16]
 

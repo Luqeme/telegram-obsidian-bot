@@ -88,7 +88,9 @@ def test_today_widget_shell_reads_chat_data() -> None:
     assert markup
     assert "TelegramWidget.chatData" in markup
     assert "chatDataChanged" in markup
-    assert "TelegramWidget.request('done:'" in markup
+    assert "data = 'done:' + el.dataset.id" in markup
+    assert "data-act=\"due\"" in markup
+    assert "data-act=\"more\"" in markup
     assert compressed_size(markup) <= MAX_COMPRESSED
 
 
@@ -100,7 +102,7 @@ def test_today_widget_script_has_no_python_artifacts() -> None:
     assert script is not None
 
     code = script.group(1)
-    assert "function render()" in code
+    assert "function render(" in code
     assert not re.search(r"^\s*def\s+\w+\s*\(", code, re.M)
 
 
@@ -143,6 +145,40 @@ def test_today_state_payload() -> None:
     assert [task["i"] for task in state["t"]] == ["a1", "b2", "c3"]
     assert [task["k"] for task in state["t"]] == ["⏳", "📅", "•"]
     assert state["t"][1]["d"] == "13.11"
+
+
+def test_today_state_pages_tasks() -> None:
+    from types import SimpleNamespace
+
+    from handlers.digest import build_today_state
+
+    tasks = [
+        SimpleNamespace(id=f"id{index}", raw=f"Задача {index}", text=f"Задача {index}", due="")
+        for index in range(7)
+    ]
+    data = {
+        "today_notes": [],
+        "inbox": [],
+        "tasks": tasks,
+        "ordered": tasks,
+        "overdue": [],
+        "due_today": [],
+        "expense": 0,
+        "income": 0,
+        "truncated": None,
+    }
+
+    first = build_today_state(data)
+    assert first["off"] == 0
+    assert first["tot"] == 7
+    assert [task["i"] for task in first["t"]] == [f"id{index}" for index in range(5)]
+
+    second = build_today_state(data, 5)
+    assert second["off"] == 5
+    assert [task["i"] for task in second["t"]] == ["id5", "id6"]
+
+    reset = build_today_state(data, 99)
+    assert reset["off"] == 0
 
 
 def test_today_state_fits_chat_data_limit() -> None:
@@ -209,7 +245,7 @@ def test_weekly_widget_contains_review() -> None:
 def test_today_widget_shell_requests_done() -> None:
     markup = build_today_widget()
 
-    assert "request('done:' + id)" in markup
+    assert "TelegramWidget.request(data)" in markup
 
 
 def test_year_widget_contains_months_and_fits() -> None:

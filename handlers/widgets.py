@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from services import GitHubError, Services
+from services.notes_index import with_due
 from services.widget_shim import WidgetQuery, answer_widget_query, edit_widget_data
 
 from .digest import build_today_state, collect_today, dumps_state
@@ -28,6 +29,15 @@ async def on_widget_query(query: WidgetQuery, services: Services) -> None:
         data = query.data or ""
         if data.startswith("done:"):
             await _close_task(services, token, query, data[5:])
+            return
+        if data.startswith("due:"):
+            await _set_due(services, token, query, data[4:])
+            return
+        if data.startswith("more:"):
+            await _page_today(services, token, query, data[5:])
+            return
+        if data.startswith("prev:"):
+            await _page_today(services, token, query, data[5:])
             return
         if data.startswith(REPORT_PREFIX):
             await _report(services, token, query, data[len(REPORT_PREFIX):])
@@ -95,6 +105,89 @@ async def _refresh_today(services: Services, token: str, query: WidgetQuery) -> 
     )
     if not ok:
         logger.warning("widget today refresh failed chat=%s", query.chat.id)
+
+
+async def _page_today(
+    services: Services, token: str, query: WidgetQuery, value: str
+) -> None:
+    """Листает список задач внутри виджета."""
+    if query.chat is None or query.message_id is None:
+        await answer_widget_query(token, query.id, "missing")
+        return
+
+    try:
+        offset = max(0, int(value))
+    except ValueError:
+        offset = 0
+
+    await answer_widget_query(token, query.id, "ok")
+    try:
+        data = await collect_today(services)
+    except GitHubError as exc:
+        logger.error("widget today page: %s", exc)
+        return
+
+    state = build_today_state(data, offset)
+    await edit_widget_data(
+        token,
+        query.chat.id,
+        query.message_id,
+        dumps_state(state),
+    )
+
+
+async def _set_due(
+    services: Services, token: str, query: WidgetQuery, payload: str
+) -> None:
+    """Переносит задачу на завтра / +3 дня или убирает дату."""
+    task_id, _, mode = payload.partition(":")
+    try:
+        task = await services.index.find_task(task_id)
+    except GitHubError as exc:
+        logger.error("widget due: %s", exc)
+        await answer_widget_query(token, query.id, "error")
+        return
+
+    if task is None:
+        await answer_widget_query(token, query.id, "missing")
+        return
+
+    today = datetime.now(services.settings.tz).date()
+    if mode == "tomorrow":
+        due: str | None = (today + timedelta(days=1)).isoformat()
+    elif mode == "plus3":
+        due = (today + timedelta(days=3)).isoformat()
+    elif mode == "clear":
+        due = None
+    else:
+        await answer_widget_query(token, query.id, "unknown")
+        return
+
+    new_raw = with_due(task.raw, due)
+    if new_raw == task.raw:
+        await answer_widget_query(token, query.id, "same")
+        return
+
+    try:
+        updated = await services.github.replace_line(
+            task.note.path,
+            f"- [ ] {task.raw}",
+            f"- [ ] {new_raw}",
+            f"Task due: {task.text}",
+        )
+    except GitHubError as exc:
+        logger.error("widget due: %s", exc)
+        await answer_widget_query(token, query.id, "error")
+        return
+
+    if not updated:
+        await answer_widget_query(token, query.id, "changed")
+        return
+
+    services.index.invalidate()
+    logger.info("task_due_widget path=%s mode=%s", task.note.path, mode)
+    await answer_widget_query(token, query.id, "ok")
+    await _refresh_today(services, token, query)
 
 
 async def _report(
