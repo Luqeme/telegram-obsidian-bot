@@ -64,6 +64,28 @@ def test_project_matches_title_or_alias() -> None:
     assert _match_target("", hubs) is None
 
 
+def test_fix_reply_filter_matches_prompt() -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    from handlers.notes import FIX_PENDING, IsFixReply
+
+    FIX_PENDING[5] = ("token", 42)
+    try:
+        match = SimpleNamespace(
+            from_user=SimpleNamespace(id=5),
+            reply_to_message=SimpleNamespace(message_id=42),
+        )
+        other = SimpleNamespace(
+            from_user=SimpleNamespace(id=5),
+            reply_to_message=SimpleNamespace(message_id=43),
+        )
+        assert asyncio.run(IsFixReply()(match)) is True
+        assert asyncio.run(IsFixReply()(other)) is False
+    finally:
+        FIX_PENDING.pop(5, None)
+
+
 def test_fallback_title_uses_first_words() -> None:
     assert _fallback_title("Купить молоко завтра утром, а ещё позвонить в сервис.") == (
         "Купить молоко завтра утром, а ещё позвонить"

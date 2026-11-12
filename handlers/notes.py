@@ -13,9 +13,10 @@ from datetime import datetime
 from aiogram import Bot, F, Router
 from aiogram.enums import ChatAction
 from aiogram.exceptions import TelegramAPIError
-from aiogram.filters import Command
+from aiogram.filters import Command, Filter
 from aiogram.types import (
     CallbackQuery,
+    ForceReply,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
@@ -61,6 +62,23 @@ UNDO = UndoStore()
 _PROJECT_NOTES: dict[str, str] = {}
 _PROJECT_HUBS: dict[str, str] = {}
 _PROJECT_FOLDERS: dict[str, str] = {}
+
+# путь заметки -> (исходный текст, source, user_id)
+_FIX_DATA: dict[str, tuple[str, str, int]] = {}
+# user_id -> (token кнопки «Исправить», id сообщения-приглашения)
+FIX_PENDING: dict[int, tuple[str, int]] = {}
+
+
+class IsFixReply(Filter):
+    """Пользователь отвечает на приглашение исправить текст."""
+
+    async def __call__(self, message: Message) -> bool:
+        user = message.from_user
+        reply = message.reply_to_message
+        if user is None or reply is None:
+            return False
+        entry = FIX_PENDING.get(user.id)
+        return bool(entry and entry[1] == reply.message_id)
 
 
 def _csv_row(values: list[str]) -> str:
@@ -179,6 +197,69 @@ async def _undo_action(user_id: int, message: Message, services: Services) -> No
         UNDO.push(user_id, action)
         logger.error("undo: %s", exc)
         await message.answer(exc.user_message)
+
+
+@router.message(IsFixReply(), F.text)
+async def on_fix_reply(message: Message, bot: Bot, services: Services) -> None:
+    user = message.from_user
+    if user is None:
+        return
+
+    entry = FIX_PENDING.pop(user.id, None)
+    if entry is None:
+        return
+    token, _ = entry
+
+    path = _PROJECT_NOTES.get(token)
+    data = _FIX_DATA.get(path) if path else None
+    if not path or data is None:
+        await message.answer("✏️ Кнопка устарела — пришли заметку заново.")
+        return
+
+    corrected = (message.text or "").strip()
+    if len(corrected) < MIN_TEXT_LEN or not any(char.isalpha() for char in corrected):
+        await message.answer(
+            "🤔 Слишком коротко. Пришли исправленный текст целиком."
+        )
+        return
+
+    original, source, _owner = data
+    new_path = await _process(
+        bot,
+        message,
+        services,
+        text=corrected,
+        original=corrected,
+        source=source,
+        exclude_path=path,
+    )
+    if new_path is None:
+        await message.answer(
+            "Не удалось пересобрать заметку. Старая осталась на месте."
+        )
+        return
+
+    try:
+        deleted = await services.github.delete_file(
+            path, f"Replace note: {path}"
+        )
+    except GitHubError as exc:
+        logger.error("fix delete: %s", exc)
+        await message.answer(
+            "Новая заметка создана, но старую удалить не удалось. "
+            "Удали её вручную или через /undo."
+        )
+        return
+
+    services.index.invalidate()
+    _FIX_DATA.pop(path, None)
+    logger.info("note_replaced old=%s new=%s", path, new_path)
+    if deleted:
+        await message.answer("♻️ Заметка пересобрана, старая удалена.")
+    else:
+        await message.answer(
+            "♻️ Заметка пересобрана. Старую не нашёл — возможно, её уже перенесли."
+        )
 
 
 @router.message(F.text & ~F.text.startswith("/"))
@@ -439,6 +520,12 @@ def _fallback_title(text: str) -> str:
     return title or "Заметка"
 
 
+def _remember_fix(path: str, original: str, source: str, owner: int) -> None:
+    _FIX_DATA[path] = (original, source, owner)
+    while len(_FIX_DATA) > 1000:
+        _FIX_DATA.pop(next(iter(_FIX_DATA)))
+
+
 async def _process(
     bot: Bot,
     message: Message,
@@ -447,7 +534,8 @@ async def _process(
     text: str,
     original: str,
     source: str,
-) -> None:
+    exclude_path: str | None = None,
+) -> str | None:
     now = datetime.now(services.settings.tz)
 
     known_tags: list[str] = []
@@ -479,11 +567,11 @@ async def _process(
     except GroqError as exc:
         logger.error("structure_note: %s", exc)
         await message.answer(exc.user_message)
-        return
+        return None
 
     if not draft.is_meaningful:
         await message.answer("🤔 В сообщении нет содержания для заметки.")
-        return
+        return None
 
     if not draft.title:
         draft = draft.model_copy(update={"title": _fallback_title(text)})
@@ -492,16 +580,16 @@ async def _process(
 
     if draft.money_kind != "none" and draft.money_amount > 0:
         await _save_money(message, services, draft, original, created)
-        return
+        return None
 
     if draft.completed_task:
         if await _complete_task(message, services, draft.completed_task):
-            return
+            return None
         await message.answer(
             "✅ Похоже, это выполненное дело, но открытой задачи не нашёл. "
             "Если это новая мысль — переформулируй как заметку."
         )
-        return
+        return None
 
     target = None
     if draft.project:
@@ -513,14 +601,22 @@ async def _process(
         target = _match_target(draft.project, targets)
         if target is not None and target.note_type == "area":
             await _save_area_tasks(message, services, draft, target, original)
-            return
+            return None
 
     related: list[tuple[str, str]] = []
     linked_summary = draft.summary
     try:
-        all_notes = await services.index.notes()
-        for note in await services.index.similar(draft.tags, limit=2):
+        all_notes = [
+            note
+            for note in await services.index.notes()
+            if note.path != exclude_path
+        ]
+        for note in await services.index.similar(draft.tags, limit=4):
+            if note.path == exclude_path:
+                continue
             related.append((note.stem, note.title))
+            if len(related) >= 2:
+                break
         linked_summary = wiki_link(
             draft.summary, [(note.stem, note.title) for note in all_notes]
         )
@@ -555,7 +651,7 @@ async def _process(
             f"Заметка не потеряна, вот текст — пришли его позже:\n\n"
             f"{original[:3000]}"
         )
-        return
+        return None
 
     logger.info(
         "note_saved user_id=%s source=%s chars=%s path=%s",
@@ -566,12 +662,19 @@ async def _process(
     )
     services.index.invalidate()
     _push_undo(message, Action(kind="note", path=path, label="заметка"))
+    _remember_fix(
+        path,
+        original,
+        source,
+        message.from_user.id if message.from_user else 0,
+    )
 
     markup = await _project_keyboard(services, path)
     card = _render_card(path, draft, target.title if target is not None else "")
     if markup is not None:
         card += "\n\n🚀 <b>Проект?</b> Выбери или поменяй кнопкой ниже."
     await message.answer(card, parse_mode="HTML", reply_markup=markup)
+    return path
 
 
 def _remember(mapping: dict[str, str], key: str, value: str, limit: int = 1000) -> None:
@@ -661,6 +764,16 @@ async def _project_keyboard(
             ),
         ]
     )
+
+    if path in _FIX_DATA:
+        rows.insert(
+            -1,
+            [
+                InlineKeyboardButton(
+                    text="✏️ Исправить", callback_data=f"fix:{token}"
+                )
+            ],
+        )
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -859,6 +972,34 @@ async def on_project_choice(callback: CallbackQuery, services: Services) -> None
             f"<code>{html.escape(new_path)}</code>",
             parse_mode="HTML",
         )
+
+
+@router.callback_query(F.data.startswith("fix:"))
+async def on_fix_request(callback: CallbackQuery) -> None:
+    token = (callback.data or "").partition(":")[2]
+    path = _PROJECT_NOTES.get(token)
+    data = _FIX_DATA.get(path) if path else None
+    if not path or data is None:
+        await callback.answer(
+            "Кнопка устарела — пришли заметку заново.", show_alert=True
+        )
+        return
+
+    message = callback.message
+    if not isinstance(message, Message):
+        await callback.answer()
+        return
+
+    original, _source, _owner = data
+    prompt = (
+        "✏️ Пришли исправленный текст ответом на это сообщение.\n\n"
+        f"<b>Было:</b>\n<code>{html.escape(original[:2000])}</code>"
+    )
+    sent = await message.answer(
+        prompt, parse_mode="HTML", reply_markup=ForceReply(selective=True)
+    )
+    FIX_PENDING[callback.from_user.id] = (token, sent.message_id)
+    await callback.answer()
 
 
 async def _save_area_tasks(
