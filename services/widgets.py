@@ -13,6 +13,7 @@ WIDGET_URL = "https://api.telegram.org/bot{token}/sendWidget"
 WIDGET_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 MAX_COMPRESSED = 4096
 MAX_CATEGORIES = 6
+MAX_TASKS = 6
 MONTH_SHORT = (
     "янв",
     "фев",
@@ -67,6 +68,73 @@ def build_report_widget(summary: MonthSummary, month: str) -> str:
 .t i{{display:block;height:100%;border-radius:4px;background:var(--tg-theme-button-color)}}
 .v{{width:68px;text-align:right;font-size:12px;color:var(--tg-theme-hint-color)}}
 .empty{{color:var(--tg-theme-hint-color);font-size:13px}}
+</style>
+"""
+    if compressed_size(markup) > MAX_COMPRESSED:
+        return ""
+    return markup
+
+
+def build_today_widget(
+    *,
+    notes_today: int,
+    inbox: int,
+    open_tasks: int,
+    overdue: int,
+    due_today: int,
+    tasks: list[dict],
+    expense: float = 0.0,
+    income: float = 0.0,
+) -> str:
+    """Виджет «Сегодня»: статистика дня и ближайшие задачи."""
+    rows: list[str] = []
+    for task in tasks[:MAX_TASKS]:
+        icon = task.get("icon", "•")
+        due = task.get("due", "")
+        due_text = f"{due[8:10]}.{due[5:7]}" if due else ""
+        text = task.get("text", "")
+        if len(text) > 70:
+            text = text[:69].rstrip() + "…"
+        rows.append(
+            f'<div class="task"><span class="i">{icon}</span>'
+            f'<span class="x">{html.escape(text)}</span>'
+            f'<span class="d">{due_text}</span></div>'
+        )
+    if not rows:
+        rows.append('<div class="empty">Открытых задач нет.</div>')
+
+    money = ""
+    parts: list[str] = []
+    if expense:
+        parts.append(f"−{format_rub(expense)} ₽")
+    if income:
+        parts.append(f"+{format_rub(income)} ₽")
+    if parts:
+        money = f'<div class="money">Сегодня: <b>{" · ".join(parts)}</b></div>'
+
+    markup = f"""
+<div class="w">
+  <div class="stats">
+    <div><span>Задач</span><b>{open_tasks}</b></div>
+    <div><span>Просрочено</span><b>{overdue}</b></div>
+    <div><span>На сегодня</span><b>{due_today}</b></div>
+    <div><span>Инбокс</span><b>{inbox}</b></div>
+  </div>
+  <div class="date">Заметок сегодня: {notes_today}{money}</div>
+  <div class="tasks">{''.join(rows)}</div>
+</div>
+<style>
+.w{{font:14px system-ui,sans-serif;color:var(--tg-theme-text-color);padding:4px 2px}}
+.stats{{display:flex;gap:10px;margin-bottom:8px}}
+.stats div{{flex:1}}
+.stats span{{display:block;color:var(--tg-theme-hint-color);font-size:11px}}
+.date{{font-size:12px;color:var(--tg-theme-hint-color);margin-bottom:10px}}
+.money b{{color:var(--tg-theme-text-color)}}
+.task{{display:flex;align-items:baseline;gap:6px;margin:5px 0}}
+.i{{width:16px}}
+.x{{flex:1;font-size:13px}}
+.d{{font-size:11px;color:var(--tg-theme-hint-color)}}
+.empty{{font-size:13px;color:var(--tg-theme-hint-color)}}
 </style>
 """
     if compressed_size(markup) > MAX_COMPRESSED:
@@ -133,10 +201,13 @@ async def send_widget(
     markup: str,
     caption: str,
     *,
+    reply_markup: dict | None = None,
     client: httpx.AsyncClient | None = None,
 ) -> tuple[bool, str]:
     """Отправляет виджет сырым Bot API. Возвращает (успех, причина ошибки)."""
-    payload = {"chat_id": chat_id, "html": markup, "caption": caption}
+    payload: dict = {"chat_id": chat_id, "html": markup, "caption": caption}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     own = client is None
     client = client or httpx.AsyncClient(timeout=WIDGET_TIMEOUT)
     try:

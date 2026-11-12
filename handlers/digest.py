@@ -18,7 +18,9 @@ from aiogram.types import (
 )
 
 from services import GitHubError, Services
+from services.money import MONEY_PATH, format_rub, parse_rows, to_amount
 from services.notes_index import TaskRef
+from services.widgets import build_today_widget, send_widget
 
 logger = logging.getLogger(__name__)
 
@@ -50,17 +52,56 @@ async def cmd_today(message: Message, services: Services) -> None:
     due_today = [task for task in tasks if task.due and _due_date(task) == today]
     overdue = [task for task in tasks if task.due and _due_date(task) < today]
 
+    overdue_ids = {task.id for task in overdue}
+    due_ids = {task.id for task in due_today}
+    ordered = overdue + due_today + [
+        task for task in tasks if task.id not in overdue_ids | due_ids
+    ]
+
+    inbox_dir = services.settings.obsidian_inbox_dir.strip("/")
+    inbox_prefix = f"{inbox_dir}/" if inbox_dir else ""
+    inbox = [note for note in notes if inbox_prefix and note.path.startswith(inbox_prefix)]
+
+    expense = 0.0
+    income = 0.0
+    try:
+        for row in parse_rows(await services.github.get_text(MONEY_PATH)):
+            if str(row.get("date", "")) != today.isoformat():
+                continue
+            amount = to_amount(row.get("amount"))
+            if row.get("kind") == "expense":
+                expense += amount
+            elif row.get("kind") == "income":
+                income += amount
+    except GitHubError as exc:
+        logger.warning("today money: %s", exc)
+
+    widget_tasks = [
+        {
+            "text": task.text,
+            "due": task.due,
+            "icon": "⏳" if task.id in overdue_ids else "📅" if task.id in due_ids else "•",
+        }
+        for task in ordered[:MAX_BUTTONS]
+    ]
+
     lines = [
         f"📅 <b>Сегодня, {now:%d.%m}</b>",
         "",
         f"Заметок: <b>{len(today_notes)}</b>",
         f"Открытых задач: <b>{len(tasks)}</b>",
+        f"В инбоксе: <b>{len(inbox)}</b>",
     ]
 
     if overdue:
         lines.append(f"Просрочено: <b>{len(overdue)}</b>")
     if due_today:
         lines.append(f"На сегодня: <b>{len(due_today)}</b>")
+    if expense or income:
+        lines.append(
+            f"Сегодня: <b>−{html.escape(format_rub(expense))} ₽</b>"
+            + (f" · +{html.escape(format_rub(income))} ₽" if income else "")
+        )
     if services.index.truncated:
         indexed, total = services.index.truncated
         lines.append(f"⚠️ В индексе <b>{indexed}</b> из {total} заметок")
@@ -70,17 +111,41 @@ async def cmd_today(message: Message, services: Services) -> None:
         for note in today_notes[:5]:
             lines.append(f"• {html.escape(note.title)}")
 
-    if tasks:
+    if ordered:
         lines.extend(["", "<b>Задачи</b>"])
-        for task in tasks[: MAX_BUTTONS]:
+        for task in ordered[: MAX_BUTTONS]:
             lines.append(_task_line(task))
-        if len(tasks) > MAX_BUTTONS:
-            lines.append(f"…и ещё {len(tasks) - MAX_BUTTONS}")
+        if len(ordered) > MAX_BUTTONS:
+            lines.append(f"…и ещё {len(ordered) - MAX_BUTTONS}")
+
+    markup = build_today_widget(
+        notes_today=len(today_notes),
+        inbox=len(inbox),
+        open_tasks=len(tasks),
+        overdue=len(overdue),
+        due_today=len(due_today),
+        tasks=widget_tasks,
+        expense=expense,
+        income=income,
+    )
+    keyboard = _keyboard(ordered)
+
+    if markup:
+        ok, reason = await send_widget(
+            services.settings.telegram_bot_token,
+            message.chat.id,
+            markup,
+            f"📅 Сегодня, {now:%d.%m}",
+            reply_markup=keyboard.model_dump(exclude_none=True) if keyboard else None,
+        )
+        if ok:
+            return
+        logger.warning("today_widget: %s", reason)
 
     await message.answer(
         "\n".join(lines),
         parse_mode="HTML",
-        reply_markup=_keyboard(tasks),
+        reply_markup=keyboard,
     )
 
 

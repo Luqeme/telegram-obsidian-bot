@@ -10,6 +10,7 @@ from services.money import summarize
 from services.widgets import (
     MAX_COMPRESSED,
     build_report_widget,
+    build_today_widget,
     build_year_widget,
     compressed_size,
     report_caption,
@@ -77,6 +78,27 @@ def test_widget_escapes_category() -> None:
     assert "<b>злые</b>" not in markup
 
 
+def test_today_widget_contains_stats_and_tasks() -> None:
+    markup = build_today_widget(
+        notes_today=2,
+        inbox=3,
+        open_tasks=5,
+        overdue=1,
+        due_today=2,
+        tasks=[
+            {"text": "Купить молоко", "due": "2026-11-13", "icon": "📅"},
+            {"text": "Оплатить интернет", "due": "", "icon": "⏳"},
+        ],
+        expense=540,
+    )
+
+    assert "Задач" in markup
+    assert "Купить молоко" in markup
+    assert "13.11" in markup
+    assert "540" in markup
+    assert compressed_size(markup) <= MAX_COMPRESSED
+
+
 def test_year_widget_contains_months_and_fits() -> None:
     markup = build_year_widget(ROWS, 2026)
 
@@ -97,6 +119,8 @@ def test_caption_is_short() -> None:
 
 
 def test_send_widget_payload() -> None:
+    import json
+
     requests: list[httpx.Request] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -108,7 +132,12 @@ def test_send_widget_payload() -> None:
     async def run() -> tuple[bool, str]:
         try:
             return await send_widget(
-                "token", 42, "<div>hi</div>", "caption", client=client
+                "token",
+                42,
+                "<div>hi</div>",
+                "caption",
+                reply_markup={"inline_keyboard": [[{"text": "x", "callback_data": "t:1"}]]},
+                client=client,
             )
         finally:
             await client.aclose()
@@ -117,6 +146,8 @@ def test_send_widget_payload() -> None:
     assert ok is True
     assert reason == ""
     assert requests and requests[0].url.path.endswith("/sendWidget")
+    payload = json.loads(requests[0].content)
+    assert payload["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == "t:1"
 
 
 def test_send_widget_reports_error() -> None:
