@@ -13,6 +13,7 @@ WIDGET_URL = "https://api.telegram.org/bot{token}/sendWidget"
 WIDGET_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 MAX_COMPRESSED = 4096
 MAX_CATEGORIES = 6
+MAX_EXPENSES = 3
 MONTH_SHORT = (
     "янв",
     "фев",
@@ -47,6 +48,12 @@ def build_report_widget(summary: MonthSummary, month: str) -> str:
     if not bars:
         bars.append('<div class="empty">Расходов нет.</div>')
 
+    expenses = "".join(
+        f'<div class="e"><b>{format_rub(item["amount"])} ₽</b> '
+        f'{html.escape(item["category"])}</div>'
+        for item in summary.top_expenses[:MAX_EXPENSES]
+    )
+
     markup = f"""
 <div class="w">
   <div class="totals">
@@ -55,6 +62,7 @@ def build_report_widget(summary: MonthSummary, month: str) -> str:
     <div><span>Остаток</span><b>{format_rub(summary.balance)} ₽</b></div>
   </div>
   <div class="bars">{''.join(bars)}</div>
+  {f'<div class="top"><div class="h">Крупные траты</div>{expenses}</div>' if expenses else ''}
 </div>
 <style>
 .w{{font:14px system-ui,sans-serif;color:var(--tg-theme-text-color);padding:4px 2px}}
@@ -67,6 +75,10 @@ def build_report_widget(summary: MonthSummary, month: str) -> str:
 .t i{{display:block;height:100%;border-radius:4px;background:var(--tg-theme-button-color)}}
 .v{{width:68px;text-align:right;font-size:12px;color:var(--tg-theme-hint-color)}}
 .empty{{color:var(--tg-theme-hint-color);font-size:13px}}
+.top{{margin-top:12px;padding-top:8px;border-top:1px solid var(--tg-theme-section-separator-color)}}
+.h{{font-size:12px;color:var(--tg-theme-hint-color);margin-bottom:4px}}
+.e{{font-size:12px;color:var(--tg-theme-hint-color);margin:3px 0}}
+.e b{{color:var(--tg-theme-text-color)}}
 </style>
 """
     if compressed_size(markup) > MAX_COMPRESSED:
