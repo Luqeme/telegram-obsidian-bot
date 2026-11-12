@@ -75,42 +75,37 @@ async def on_report(callback: CallbackQuery, services: Services) -> None:
     data = callback.data or ""
     action = data.partition(":")[2]
     message = callback.message
-    if not isinstance(message, Message):
-        await callback.answer()
-        return
+    chat_id = (
+        message.chat.id
+        if message is not None
+        else callback.from_user.id
+    )
 
     await callback.answer()
 
-    if action == "now":
-        await _send_report(message, services, "current")
+    now_year = datetime.now(services.settings.tz).year
+    views = {
+        "now": "current",
+        "prev": "prev",
+        "year": f"year:{now_year}",
+        "months": f"months:{now_year}",
+    }
+    if action in views:
+        await send_report(callback.bot, chat_id, services, views[action])
         return
-    if action == "prev":
-        await _send_report(message, services, "prev")
+    if action.startswith("m:"):
+        month = _parse_month(action[2:])
+        if month is not None:
+            await send_report(callback.bot, chat_id, services, f"mon:{month}")
         return
-    if action == "year":
-        await _send_report(
-            message,
-            services,
-            f"year:{datetime.now(services.settings.tz).year}",
-        )
-        return
-    if action == "months":
-        await _send_report(
-            message,
-            services,
-            f"months:{datetime.now(services.settings.tz).year}",
-        )
+
+    if not isinstance(message, Message):
         return
     if action == "back":
         await show_report_menu(message)
         return
     if action == "main":
         await _edit(message, MAIN_TEXT, main_menu())
-        return
-    if action.startswith("m:"):
-        month = _parse_month(action[2:])
-        if month is not None:
-            await _send_report(message, services, f"mon:{month}")
         return
 
     await message.answer("Неизвестный пункт отчёта.")
@@ -186,14 +181,33 @@ async def report_loop(bot: Bot, services: Services) -> None:
 async def _send_report(
     message: Message, services: Services, view: str
 ) -> None:
-    logger.info("report send view=%r chat=%s", view, message.chat.id)
+    await send_report(
+        message.bot,
+        message.chat.id,
+        services,
+        view,
+        notify=message.answer,
+    )
+
+
+async def send_report(
+    bot: Bot,
+    chat_id: int,
+    services: Services,
+    view: str = "current",
+    *,
+    notify=None,
+) -> None:
+    """Отправляет виджет отчёта в чат. notify — куда писать текст ошибки."""
+    logger.info("report send view=%r chat=%s", view, chat_id)
     try:
         rows = await _read_money(services)
     except GitHubError as exc:
         logger.error("report: %s", exc)
-        await message.answer(exc.user_message)
+        if notify is not None:
+            await notify(exc.user_message)
         return
-    await _send_report_state(message.bot, message.chat.id, services, rows, view)
+    await _send_report_state(bot, chat_id, services, rows, view)
 
 
 def report_state(

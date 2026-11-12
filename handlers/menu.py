@@ -11,9 +11,9 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, ForceReply, Message
 
 from handlers.base import PENDING, cmd_help
-from handlers.digest import _keyboard, cmd_today
+from handlers.digest import _keyboard, send_today
 from handlers.notes import _undo_action
-from handlers.report import cmd_report
+from handlers.report import send_report
 from handlers.menu_ui import main_menu
 from services import GitHubError, Services
 
@@ -37,6 +37,28 @@ async def on_menu(callback: CallbackQuery, services: Services) -> None:
         action,
         type(message).__name__,
     )
+
+    chat_id = (
+        message.chat.id
+        if message is not None
+        else callback.from_user.id
+    )
+
+    # Эти два пункта только отправляют новое сообщение, поэтому работают
+    # даже если исходное меню уже недоступно (старше 48 часов).
+    if action == "report":
+        await callback.answer()
+        await send_report(callback.bot, chat_id, services, "current")
+        return
+    if action == "today":
+        await callback.answer()
+        await send_today(callback.bot, chat_id, services)
+        return
+    if action == "money":
+        await callback.answer()
+        await send_report(callback.bot, chat_id, services, "current")
+        return
+
     if not isinstance(message, Message):
         await callback.answer()
         return
@@ -47,13 +69,7 @@ async def on_menu(callback: CallbackQuery, services: Services) -> None:
         await _ask_for_query(callback, message, action)
         return
 
-    if action == "today":
-        await cmd_today(message, services)
-    elif action == "report":
-        await cmd_report(message, services)
-    elif action == "money":
-        await cmd_report(message, services)
-    elif action == "undo":
+    if action == "undo":
         await _undo_action(callback.from_user.id, message, services)
     elif action == "help":
         await cmd_help(message)

@@ -200,15 +200,25 @@ def test_money_fields_default_to_none() -> None:
     assert draft.money_category == ""
 
 
-def test_menu_report_opens_widget_directly() -> None:
-    calls: list[tuple[Message, object]] = []
-    original = menu_handlers.cmd_report
-
-    async def fake_report(message, services) -> None:
-        calls.append((message, services))
-
+def _menu_callback(data: str, message=None, user_id: int = 2):
     async def answer(*args, **kwargs) -> bool:
         return True
+
+    return SimpleNamespace(
+        data=data,
+        message=message,
+        from_user=SimpleNamespace(id=user_id),
+        bot="bot-stub",
+        answer=answer,
+    )
+
+
+def test_menu_report_opens_widget_directly() -> None:
+    calls: list[tuple] = []
+    original = menu_handlers.send_report
+
+    async def fake_report(bot, chat_id, services, view="current", **kwargs) -> None:
+        calls.append((bot, chat_id, services, view))
 
     message = Message.model_validate(
         {
@@ -217,17 +227,101 @@ def test_menu_report_opens_widget_directly() -> None:
             "chat": {"id": 2, "type": "private"},
         }
     )
-    callback = SimpleNamespace(
-        data="menu:report",
-        message=message,
-        from_user=SimpleNamespace(id=2),
-        answer=answer,
-    )
+    callback = _menu_callback("menu:report", message)
 
-    menu_handlers.cmd_report = fake_report
+    menu_handlers.send_report = fake_report
     try:
         asyncio.run(menu_handlers.on_menu(callback, "services"))
     finally:
-        menu_handlers.cmd_report = original
+        menu_handlers.send_report = original
 
-    assert calls == [(message, "services")]
+    assert calls == [("bot-stub", 2, "services", "current")]
+
+
+def test_menu_report_works_for_inaccessible_message() -> None:
+    """Старое меню приходит как InaccessibleMessage — отчёт всё равно уходит."""
+    from aiogram.types import InaccessibleMessage
+
+    calls: list[tuple] = []
+    original = menu_handlers.send_report
+
+    async def fake_report(bot, chat_id, services, view="current", **kwargs) -> None:
+        calls.append((bot, chat_id, view))
+
+    message = InaccessibleMessage.model_validate(
+        {"message_id": 1, "date": 0, "chat": {"id": 2, "type": "private"}}
+    )
+    callback = _menu_callback("menu:report", message)
+
+    menu_handlers.send_report = fake_report
+    try:
+        asyncio.run(menu_handlers.on_menu(callback, "services"))
+    finally:
+        menu_handlers.send_report = original
+
+    assert calls == [("bot-stub", 2, "current")]
+
+
+def test_menu_today_works_for_inaccessible_message() -> None:
+    from aiogram.types import InaccessibleMessage
+
+    calls: list[tuple] = []
+    original = menu_handlers.send_today
+
+    async def fake_today(bot, chat_id, services, **kwargs) -> None:
+        calls.append((bot, chat_id))
+
+    message = InaccessibleMessage.model_validate(
+        {"message_id": 1, "date": 0, "chat": {"id": 2, "type": "private"}}
+    )
+    callback = _menu_callback("menu:today", message)
+
+    menu_handlers.send_today = fake_today
+    try:
+        asyncio.run(menu_handlers.on_menu(callback, "services"))
+    finally:
+        menu_handlers.send_today = original
+
+    assert calls == [("bot-stub", 2)]
+
+
+def test_menu_report_reaches_report_state() -> None:
+    from datetime import datetime, timezone
+
+    from handlers import report as report_handlers
+
+    calls: list[tuple] = []
+
+    async def fake_read(_services) -> list[dict]:
+        return []
+
+    async def fake_send(bot, chat_id, services, rows, view) -> None:
+        calls.append((chat_id, view, rows))
+
+    message = Message.model_validate(
+        {
+            "message_id": 1,
+            "date": 0,
+            "chat": {"id": 2, "type": "private"},
+        }
+    )
+    callback = _menu_callback("menu:report", message)
+    services = SimpleNamespace(
+        settings=SimpleNamespace(
+            tz=timezone.utc,
+            telegram_bot_token="token",
+        ),
+        github=SimpleNamespace(),
+    )
+
+    originals = (report_handlers.read_money, report_handlers._send_report_state)
+    report_handlers.read_money = fake_read
+    report_handlers._send_report_state = fake_send
+    try:
+        asyncio.run(menu_handlers.on_menu(callback, services))
+    finally:
+        report_handlers.read_money, report_handlers._send_report_state = originals
+
+    assert calls and calls[0][0] == 2
+    assert calls[0][1] == "current"
+    assert isinstance(datetime.now(timezone.utc), datetime)

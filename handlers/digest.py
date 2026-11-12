@@ -36,18 +36,29 @@ CHAT_DATA_LIMIT = 1024
 
 @router.message(Command("today"))
 async def cmd_today(message: Message, services: Services) -> None:
+    await send_today(
+        message.bot,
+        message.chat.id,
+        services,
+        notify=message.answer,
+    )
+
+
+async def send_today(bot: Bot, chat_id: int, services: Services, *, notify=None) -> None:
+    """Отправляет виджет «Сегодня» в чат. notify — куда писать текст ошибки."""
     try:
         data = await collect_today(services)
     except GitHubError as exc:
         logger.error("today: %s", exc)
-        await message.answer(exc.user_message)
+        if notify is not None:
+            await notify(exc.user_message)
         return
 
     markup = build_today_widget()
     if markup:
         ok, reason = await send_widget(
             services.settings.telegram_bot_token,
-            message.chat.id,
+            chat_id,
             markup,
             f"📅 Сегодня, {data['now']:%d.%m}",
             allow_queries=True,
@@ -57,7 +68,8 @@ async def cmd_today(message: Message, services: Services) -> None:
             return
         logger.warning("today_widget: %s", reason)
 
-    await message.answer(
+    await bot.send_message(
+        chat_id,
         render_today_text(data),
         parse_mode="HTML",
         reply_markup=_keyboard(data["ordered"]),
