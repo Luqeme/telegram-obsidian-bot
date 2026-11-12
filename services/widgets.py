@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import zlib
+from dataclasses import dataclass, field
 
 import httpx
 
@@ -14,6 +15,7 @@ WIDGET_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 MAX_COMPRESSED = 4096
 MAX_CATEGORIES = 6
 MAX_TASKS = 6
+
 MONTH_SHORT = (
     "янв",
     "фев",
@@ -140,6 +142,92 @@ def build_today_widget(
     if compressed_size(markup) > MAX_COMPRESSED:
         return ""
     return markup
+
+
+@dataclass(slots=True)
+class WeeklyReview:
+    period: str
+    notes_week: int
+    tasks_done: int
+    tasks_open: int
+    overdue: int
+    inbox: int
+    inbox_stale: int
+    expense: float
+    income: float
+    prev_expense: float
+    prev_income: float
+    projects_idle: list[str] = field(default_factory=list)
+
+    @property
+    def has_data(self) -> bool:
+        return any(
+            (
+                self.notes_week,
+                self.tasks_done,
+                self.tasks_open,
+                self.inbox,
+                self.expense,
+                self.income,
+            )
+        )
+
+
+def build_weekly_widget(review: WeeklyReview) -> str:
+    money_parts: list[str] = []
+    if review.expense:
+        money_parts.append(f"−{format_rub(review.expense)} ₽")
+    if review.income:
+        money_parts.append(f"+{format_rub(review.income)} ₽")
+    money = " · ".join(money_parts) or "нет трат"
+
+    comparison = ""
+    if review.prev_expense > 0:
+        delta = (review.expense - review.prev_expense) / review.prev_expense * 100
+        sign = "−" if delta < 0 else "+"
+        comparison = (
+            f'<div class="muted">Расход к прошлой неделе: '
+            f"{sign}{abs(delta):.0f}%</div>"
+        )
+
+    extra: list[str] = []
+    if review.inbox_stale:
+        extra.append(
+            f'<div class="muted">В инбоксе старше недели: '
+            f"<b>{review.inbox_stale}</b></div>"
+        )
+    if review.projects_idle:
+        names = ", ".join(html.escape(name) for name in review.projects_idle[:4])
+        extra.append(f'<div class="muted">Без движения: {names}</div>')
+
+    markup = f"""
+<div class="w">
+  <div class="stats">
+    <div><span>Заметок</span><b>{review.notes_week}</b></div>
+    <div><span>Закрыто</span><b>{review.tasks_done}</b></div>
+    <div><span>Открыто</span><b>{review.tasks_open}</b></div>
+    <div><span>Инбокс</span><b>{review.inbox}</b></div>
+  </div>
+  <div class="money">Деньги: <b>{money}</b></div>
+  {comparison}
+  {''.join(extra)}
+</div>
+<style>
+.w{{font:14px system-ui,sans-serif;color:var(--tg-theme-text-color);padding:4px 2px}}
+.stats{{display:flex;gap:10px;margin-bottom:10px}}
+.stats div{{flex:1}}
+.stats span{{display:block;color:var(--tg-theme-hint-color);font-size:11px}}
+.money{{font-size:13px;margin-bottom:4px}}
+.muted{{font-size:12px;color:var(--tg-theme-hint-color);margin:3px 0}}
+</style>
+"""
+    if compressed_size(markup) > MAX_COMPRESSED:
+        return ""
+    return markup
+
+
+def weekly_caption(review: WeeklyReview) -> str:
+    return f"🗓 Итоги недели · {review.period}"
 
 
 def report_caption(month: str) -> str:

@@ -61,6 +61,26 @@ def test_weekly_returns_empty_without_inbox() -> None:
     assert asyncio.run(build_weekly(_services("00_Inbox", notes))) == ""
 
 
+def test_money_range_sums_dates() -> None:
+    from datetime import date
+
+    from handlers.health import _money_range
+
+    rows = [
+        {"date": "2026-11-06", "kind": "expense", "amount": "100"},
+        {"date": "2026-11-12", "kind": "income", "amount": "500"},
+        {"date": "2026-11-05", "kind": "expense", "amount": "999"},
+        {"date": "мусор", "kind": "expense", "amount": "5"},
+    ]
+
+    expense, income = _money_range(
+        rows, date(2026, 11, 6), date(2026, 11, 12)
+    )
+
+    assert expense == 100
+    assert income == 500
+
+
 def test_weekly_survives_broken_index() -> None:
     class BrokenIndex:
         async def notes(self) -> list[Any]:

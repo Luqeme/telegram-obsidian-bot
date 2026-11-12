@@ -9,12 +9,15 @@ import httpx
 from services.money import summarize
 from services.widgets import (
     MAX_COMPRESSED,
+    WeeklyReview,
     build_report_widget,
     build_today_widget,
+    build_weekly_widget,
     build_year_widget,
     compressed_size,
     report_caption,
     send_widget,
+    weekly_caption,
     year_caption,
 )
 
@@ -97,6 +100,33 @@ def test_today_widget_contains_stats_and_tasks() -> None:
     assert "13.11" in markup
     assert "540" in markup
     assert compressed_size(markup) <= MAX_COMPRESSED
+
+
+def test_weekly_widget_contains_review() -> None:
+    review = WeeklyReview(
+        period="06.11–12.11",
+        notes_week=3,
+        tasks_done=5,
+        tasks_open=2,
+        overdue=1,
+        inbox=4,
+        inbox_stale=1,
+        expense=1000,
+        income=2000,
+        prev_expense=500,
+        prev_income=0,
+        projects_idle=["Дашборд"],
+    )
+
+    markup = build_weekly_widget(review)
+
+    assert "Заметок" in markup
+    assert "Закрыто" in markup
+    assert "1 000" in markup
+    assert "Дашборд" in markup
+    assert "старше недели" in markup
+    assert compressed_size(markup) <= MAX_COMPRESSED
+    assert weekly_caption(review) == "🗓 Итоги недели · 06.11–12.11"
 
 
 def test_year_widget_contains_months_and_fits() -> None:
