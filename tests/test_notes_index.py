@@ -142,13 +142,13 @@ def test_reads_up_link() -> None:
 
 def test_reads_project_metadata() -> None:
     raw = (
-        '---\ntype: project\ntitle: "Shot Bot"\n'
-        'description: "Бот учёта уколов"\naliases:\n  - шот бот\n  - дневник уколов\n'
-        "---\n\n# Shot Bot\n"
+        '---\ntype: project\ntitle: "Peptrack"\n'
+        'description: "Бот учёта уколов"\naliases:\n  - пептрек\n  - дневник уколов\n'
+        "---\n\n# Peptrack\n"
     )
-    note = parse_note("20_Projects/Shot Bot.md", raw)
+    note = parse_note("20_Projects/Peptrack.md", raw)
 
-    assert note.aliases == ("шот бот", "дневник уколов")
+    assert note.aliases == ("пептрек", "дневник уколов")
     assert note.description == "Бот учёта уколов"
 
 

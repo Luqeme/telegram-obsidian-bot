@@ -167,7 +167,7 @@ def test_empty_title_is_allowed_for_meaningless_input() -> None:
 def test_draft_carries_project_and_schema_requires_it() -> None:
     from prompts import NOTE_DRAFT_SCHEMA
 
-    assert make_draft(project="Shot Bot").project == "Shot Bot"
+    assert make_draft(project="Peptrack").project == "Peptrack"
     assert make_draft().project == ""
     assert make_draft(completed_task="Купил молоко").completed_task == "Купил молоко"
     assert "project" in NOTE_DRAFT_SCHEMA["required"]

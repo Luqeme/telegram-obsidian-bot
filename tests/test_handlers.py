@@ -48,14 +48,18 @@ def test_too_long_is_rejected() -> None:
 
 def test_project_matches_title_or_alias() -> None:
     hubs = [
-        SimpleNamespace(title="Shot Bot", aliases=("шот бот", "дневник уколов")),
-        SimpleNamespace(title="Бот", aliases=()),
+        SimpleNamespace(
+            title="Peptrack",
+            aliases=("Peptrack", "пептрек", "Shot Bot", "шот бот", "дневник уколов"),
+        ),
+        SimpleNamespace(title="Obsidian", aliases=("Бот", "Обсидиан")),
     ]
 
-    assert _match_target("Shot Bot", hubs).title == "Shot Bot"
-    assert _match_target("shot-bot", hubs).title == "Shot Bot"
-    assert _match_target("дневник уколов", hubs).title == "Shot Bot"
-    assert _match_target("бот", hubs).title == "Бот"
+    assert _match_target("Peptrack", hubs).title == "Peptrack"
+    assert _match_target("shot-bot", hubs).title == "Peptrack"
+    assert _match_target("дневник уколов", hubs).title == "Peptrack"
+    assert _match_target("бот", hubs).title == "Obsidian"
+    assert _match_target("обсидиан", hubs).title == "Obsidian"
     assert _match_target("несуществующий", hubs) is None
     assert _match_target("", hubs) is None
 
