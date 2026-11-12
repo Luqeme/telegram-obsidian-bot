@@ -81,25 +81,55 @@ def test_widget_escapes_category() -> None:
     assert "<b>злые</b>" not in markup
 
 
-def test_today_widget_contains_stats_and_tasks() -> None:
-    markup = build_today_widget(
-        notes_today=2,
-        inbox=3,
-        open_tasks=5,
-        overdue=1,
-        due_today=2,
-        tasks=[
-            {"text": "Купить молоко", "due": "2026-11-13", "icon": "📅"},
-            {"text": "Оплатить интернет", "due": "", "icon": "⏳"},
-        ],
-        expense=540,
+def test_today_widget_shell_reads_chat_data() -> None:
+    markup = build_today_widget()
+
+    assert markup
+    assert "TelegramWidget.chatData" in markup
+    assert "chatDataChanged" in markup
+    assert "TelegramWidget.request('done:'" in markup
+    assert compressed_size(markup) <= MAX_COMPRESSED
+
+
+def test_today_state_payload() -> None:
+    from types import SimpleNamespace
+
+    from handlers.digest import build_today_state
+
+    overdue = SimpleNamespace(
+        id="a1",
+        raw="Просроченная задача",
+        text="Просроченная задача",
+        due="2026-11-10",
+    )
+    due_today = SimpleNamespace(
+        id="b2", raw="Купить молоко ⏳ 2026-11-13", text="Купить молоко", due="2026-11-13"
+    )
+    plain = SimpleNamespace(id="c3", raw="Позвонить", text="Позвонить", due="")
+
+    state = build_today_state(
+        {
+            "today_notes": [1, 2],
+            "inbox": [1, 2, 3],
+            "tasks": [overdue, due_today, plain],
+            "ordered": [overdue, due_today, plain],
+            "overdue": [overdue],
+            "due_today": [due_today],
+            "expense": 540,
+            "income": 0,
+            "truncated": None,
+        }
     )
 
-    assert "Задач" in markup
-    assert "Купить молоко" in markup
-    assert "13.11" in markup
-    assert "540" in markup
-    assert compressed_size(markup) <= MAX_COMPRESSED
+    assert state["n"] == 2
+    assert state["in"] == 3
+    assert state["o"] == 3
+    assert state["ov"] == 1
+    assert state["du"] == 1
+    assert "540" in state["m"]
+    assert [task["i"] for task in state["t"]] == ["a1", "b2", "c3"]
+    assert [task["k"] for task in state["t"]] == ["⏳", "📅", "•"]
+    assert state["t"][1]["d"] == "13.11"
 
 
 def test_weekly_widget_contains_review() -> None:
@@ -129,17 +159,10 @@ def test_weekly_widget_contains_review() -> None:
     assert weekly_caption(review) == "🗓 Итоги недели · 06.11–12.11"
 
 
-def test_today_widget_has_done_button() -> None:
-    markup = build_today_widget(
-        notes_today=1,
-        inbox=0,
-        open_tasks=1,
-        overdue=0,
-        due_today=0,
-        tasks=[{"text": "Купить молоко", "due": "", "icon": "•", "id": "abc123"}],
-    )
+def test_today_widget_shell_requests_done() -> None:
+    markup = build_today_widget()
 
-    assert "TelegramWidget.request('done:abc123')" in markup
+    assert "request('done:' + b.dataset.id)" in markup
 
 
 def test_year_widget_contains_months_and_fits() -> None:
@@ -181,6 +204,7 @@ def test_send_widget_payload() -> None:
                 "caption",
                 reply_markup={"inline_keyboard": [[{"text": "x", "callback_data": "t:1"}]]},
                 allow_queries=True,
+                chat_data='{"o":1}',
                 client=client,
             )
         finally:
@@ -193,6 +217,7 @@ def test_send_widget_payload() -> None:
     payload = json.loads(requests[0].content)
     assert payload["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == "t:1"
     assert payload["allow_queries"] is True
+    assert payload["chat_data"] == '{"o":1}'
 
 
 def test_send_widget_reports_error() -> None:

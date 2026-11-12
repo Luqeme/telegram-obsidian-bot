@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -33,12 +34,36 @@ BUTTON_LABEL = 40
 @router.message(Command("today"))
 async def cmd_today(message: Message, services: Services) -> None:
     try:
-        tasks = await services.index.open_tasks()
-        notes = await services.index.notes()
+        data = await collect_today(services)
     except GitHubError as exc:
         logger.error("today: %s", exc)
         await message.answer(exc.user_message)
         return
+
+    markup = build_today_widget()
+    if markup:
+        ok, reason = await send_widget(
+            services.settings.telegram_bot_token,
+            message.chat.id,
+            markup,
+            f"📅 Сегодня, {data['now']:%d.%m}",
+            allow_queries=True,
+            chat_data=json.dumps(build_today_state(data), ensure_ascii=False),
+        )
+        if ok:
+            return
+        logger.warning("today_widget: %s", reason)
+
+    await message.answer(
+        render_today_text(data),
+        parse_mode="HTML",
+        reply_markup=_keyboard(data["ordered"]),
+    )
+
+
+async def collect_today(services: Services) -> dict:
+    tasks = await services.index.open_tasks()
+    notes = await services.index.notes()
 
     tz = services.settings.tz
     now = datetime.now(tz)
@@ -60,7 +85,9 @@ async def cmd_today(message: Message, services: Services) -> None:
 
     inbox_dir = services.settings.obsidian_inbox_dir.strip("/")
     inbox_prefix = f"{inbox_dir}/" if inbox_dir else ""
-    inbox = [note for note in notes if inbox_prefix and note.path.startswith(inbox_prefix)]
+    inbox = [
+        note for note in notes if inbox_prefix and note.path.startswith(inbox_prefix)
+    ]
 
     expense = 0.0
     income = 0.0
@@ -76,78 +103,88 @@ async def cmd_today(message: Message, services: Services) -> None:
     except GitHubError as exc:
         logger.warning("today money: %s", exc)
 
-    widget_tasks = [
-        {
-            "text": task.text,
-            "due": task.due,
-            "icon": "⏳" if task.id in overdue_ids else "📅" if task.id in due_ids else "•",
-            "id": task.id,
-        }
-        for task in ordered[:MAX_BUTTONS]
-    ]
+    return {
+        "now": now,
+        "today_notes": today_notes,
+        "inbox": inbox,
+        "tasks": tasks,
+        "ordered": ordered,
+        "overdue": overdue,
+        "due_today": due_today,
+        "expense": expense,
+        "income": income,
+        "truncated": services.index.truncated,
+    }
 
+
+def build_today_state(data: dict) -> dict:
+    overdue_ids = {task.id for task in data["overdue"]}
+    due_ids = {task.id for task in data["due_today"]}
+    tasks = []
+    for task in data["ordered"][:MAX_BUTTONS]:
+        due = task.due or ""
+        tasks.append(
+            {
+                "i": task.id,
+                "x": task.text[:60],
+                "d": f"{due[8:10]}.{due[5:7]}" if due else "",
+                "k": "⏳" if task.id in overdue_ids else "📅" if task.id in due_ids else "•",
+            }
+        )
+
+    parts: list[str] = []
+    if data["expense"]:
+        parts.append(f"−{format_rub(data['expense'])} ₽")
+    if data["income"]:
+        parts.append(f"+{format_rub(data['income'])} ₽")
+
+    return {
+        "n": len(data["today_notes"]),
+        "in": len(data["inbox"]),
+        "o": len(data["tasks"]),
+        "ov": len(data["overdue"]),
+        "du": len(data["due_today"]),
+        "m": " · ".join(parts),
+        "t": tasks,
+    }
+
+
+def render_today_text(data: dict) -> str:
+    now = data["now"]
     lines = [
         f"📅 <b>Сегодня, {now:%d.%m}</b>",
         "",
-        f"Заметок: <b>{len(today_notes)}</b>",
-        f"Открытых задач: <b>{len(tasks)}</b>",
-        f"В инбоксе: <b>{len(inbox)}</b>",
+        f"Заметок: <b>{len(data['today_notes'])}</b>",
+        f"Открытых задач: <b>{len(data['tasks'])}</b>",
+        f"В инбоксе: <b>{len(data['inbox'])}</b>",
     ]
 
-    if overdue:
-        lines.append(f"Просрочено: <b>{len(overdue)}</b>")
-    if due_today:
-        lines.append(f"На сегодня: <b>{len(due_today)}</b>")
-    if expense or income:
-        lines.append(
-            f"Сегодня: <b>−{html.escape(format_rub(expense))} ₽</b>"
-            + (f" · +{html.escape(format_rub(income))} ₽" if income else "")
-        )
-    if services.index.truncated:
-        indexed, total = services.index.truncated
+    if data["overdue"]:
+        lines.append(f"Просрочено: <b>{len(data['overdue'])}</b>")
+    if data["due_today"]:
+        lines.append(f"На сегодня: <b>{len(data['due_today'])}</b>")
+    if data["expense"] or data["income"]:
+        money = f"−{format_rub(data['expense'])} ₽"
+        if data["income"]:
+            money += f" · +{format_rub(data['income'])} ₽"
+        lines.append(f"Сегодня: <b>{html.escape(money)}</b>")
+    if data["truncated"]:
+        indexed, total = data["truncated"]
         lines.append(f"⚠️ В индексе <b>{indexed}</b> из {total} заметок")
 
-    if today_notes:
+    if data["today_notes"]:
         lines.extend(["", "<b>Новое</b>"])
-        for note in today_notes[:5]:
+        for note in data["today_notes"][:5]:
             lines.append(f"• {html.escape(note.title)}")
 
-    if ordered:
+    if data["ordered"]:
         lines.extend(["", "<b>Задачи</b>"])
-        for task in ordered[: MAX_BUTTONS]:
+        for task in data["ordered"][:MAX_BUTTONS]:
             lines.append(_task_line(task))
-        if len(ordered) > MAX_BUTTONS:
-            lines.append(f"…и ещё {len(ordered) - MAX_BUTTONS}")
+        if len(data["ordered"]) > MAX_BUTTONS:
+            lines.append(f"…и ещё {len(data['ordered']) - MAX_BUTTONS}")
 
-    markup = build_today_widget(
-        notes_today=len(today_notes),
-        inbox=len(inbox),
-        open_tasks=len(tasks),
-        overdue=len(overdue),
-        due_today=len(due_today),
-        tasks=widget_tasks,
-        expense=expense,
-        income=income,
-    )
-    keyboard = _keyboard(ordered)
-
-    if markup:
-        ok, reason = await send_widget(
-            services.settings.telegram_bot_token,
-            message.chat.id,
-            markup,
-            f"📅 Сегодня, {now:%d.%m}",
-            allow_queries=True,
-        )
-        if ok:
-            return
-        logger.warning("today_widget: %s", reason)
-
-    await message.answer(
-        "\n".join(lines),
-        parse_mode="HTML",
-        reply_markup=keyboard,
-    )
+    return "\n".join(lines)
 
 
 @router.callback_query(F.data.startswith("t:"))

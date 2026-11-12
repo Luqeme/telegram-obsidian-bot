@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 
 from services import GitHubError, Services
-from services.widget_shim import WidgetQuery, answer_widget_query
+from services.widget_shim import WidgetQuery, answer_widget_query, edit_widget_data
+
+from .digest import build_today_state, collect_today
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +27,7 @@ async def on_widget_query(query: WidgetQuery, services: Services) -> None:
             await _close_task(services, token, query, data[5:])
             return
 
+        logger.info("widget_query data=%r", data[:300])
         await answer_widget_query(token, query.id, "unknown")
     except Exception:  # noqa: BLE001 - виджет не должен зависать
         logger.exception("widget_query не обработан")
@@ -57,9 +61,32 @@ async def _close_task(
         await answer_widget_query(token, query.id, "error")
         return
 
-    if updated:
-        services.index.invalidate()
-        logger.info("task_done_widget path=%s", task.note.path)
-        await answer_widget_query(token, query.id, "ok")
-    else:
+    if not updated:
         await answer_widget_query(token, query.id, "changed")
+        return
+
+    services.index.invalidate()
+    logger.info("task_done_widget path=%s", task.note.path)
+    await answer_widget_query(token, query.id, "ok")
+    await _refresh_today(services, token, query)
+
+
+async def _refresh_today(services: Services, token: str, query: WidgetQuery) -> None:
+    """Пересчитывает состояние и обновляет виджет на месте."""
+    if query.chat is None or query.message_id is None:
+        return
+
+    try:
+        state = build_today_state(await collect_today(services))
+    except GitHubError as exc:
+        logger.error("widget today refresh: %s", exc)
+        return
+
+    ok = await edit_widget_data(
+        token,
+        query.chat.id,
+        query.message_id,
+        json.dumps(state, ensure_ascii=False),
+    )
+    if not ok:
+        logger.warning("widget today refresh failed chat=%s", query.chat.id)

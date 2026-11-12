@@ -16,6 +16,7 @@ from aiogram.types import Chat, Update, User
 from pydantic import BaseModel, ConfigDict, Field
 
 ANSWER_URL = "https://api.telegram.org/bot{token}/answerWidgetQuery"
+EDIT_URL = "https://api.telegram.org/bot{token}/editMessageWidgetData"
 WIDGET_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
 
@@ -79,6 +80,39 @@ async def answer_widget_query(
     try:
         response = await client.post(
             ANSWER_URL.format(token=token), json=payload, timeout=WIDGET_TIMEOUT
+        )
+        if response.status_code != 200:
+            return False
+        try:
+            return bool(response.json().get("ok"))
+        except ValueError:
+            return False
+    except httpx.HTTPError:
+        return False
+    finally:
+        if own:
+            await client.aclose()
+
+
+async def edit_widget_data(
+    token: str,
+    chat_id: int,
+    message_id: int,
+    chat_data: str,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> bool:
+    """Меняет chat_data сообщения; виджет перерисовывается сам."""
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "chat_data": chat_data,
+    }
+    own = client is None
+    client = client or httpx.AsyncClient(timeout=WIDGET_TIMEOUT)
+    try:
+        response = await client.post(
+            EDIT_URL.format(token=token), json=payload, timeout=WIDGET_TIMEOUT
         )
         if response.status_code != 200:
             return False
