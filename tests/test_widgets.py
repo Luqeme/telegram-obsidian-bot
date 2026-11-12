@@ -91,6 +91,18 @@ def test_today_widget_shell_reads_chat_data() -> None:
     assert compressed_size(markup) <= MAX_COMPRESSED
 
 
+def test_today_widget_script_has_no_python_artifacts() -> None:
+    import re
+
+    markup = build_today_widget()
+    script = re.search(r"<script>(.*?)</script>", markup, re.S)
+    assert script is not None
+
+    code = script.group(1)
+    assert "function render()" in code
+    assert not re.search(r"^\s*def\s+\w+\s*\(", code, re.M)
+
+
 def test_today_state_payload() -> None:
     from types import SimpleNamespace
 
@@ -196,7 +208,7 @@ def test_weekly_widget_contains_review() -> None:
 def test_today_widget_shell_requests_done() -> None:
     markup = build_today_widget()
 
-    assert "request('done:' + b.dataset.id)" in markup
+    assert "request('done:' + id)" in markup
 
 
 def test_year_widget_contains_months_and_fits() -> None:

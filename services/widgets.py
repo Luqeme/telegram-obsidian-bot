@@ -85,7 +85,7 @@ def build_today_widget() -> str:
 const root = document.getElementById('w');
 let last = null;
 function esc(v) { const d = document.createElement('div'); d.textContent = String(v ?? ''); return d.innerHTML; }
-def render() {
+function render() {
   let s = {};
   const raw = TelegramWidget.chatData;
   if (!raw) {
@@ -117,13 +117,13 @@ def render() {
   }
   h += '</div>';
   root.innerHTML = h;
-  root.querySelectorAll('button[data-id]').forEach((b) => {
-    b.onclick = () => {
-      b.disabled = true;
-      TelegramWidget.request('done:' + b.dataset.id).catch(() => { b.disabled = false; });
-    };
-  });
 }
+root.addEventListener('click', (e) => {
+  const id = e.target && e.target.dataset ? e.target.dataset.id : null;
+  if (!id) return;
+  e.target.disabled = true;
+  TelegramWidget.request('done:' + id).catch(() => { e.target.disabled = false; });
+});
 try { TelegramWidget.onEvent('chatDataChanged', render); } catch (e) {}
 render();
 setInterval(render, 1500);

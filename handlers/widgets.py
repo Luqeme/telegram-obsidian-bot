@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 async def on_widget_query(query: WidgetQuery, services: Services) -> None:
     token = services.settings.telegram_bot_token
+    logger.info("widget_query id=%s data=%r", query.id, (query.data or "")[:200])
 
     try:
         if query.from_user.id not in services.settings.allowed_user_ids:

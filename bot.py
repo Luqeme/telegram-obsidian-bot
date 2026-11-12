@@ -12,7 +12,7 @@ from aiogram.exceptions import (
     TelegramAPIError,
     TelegramUnauthorizedError,
 )
-from aiogram.types import BotCommand, ErrorEvent, Message
+from aiogram.types import BotCommand, ErrorEvent, Message, Update
 from pydantic import ValidationError
 
 from config import get_settings
@@ -127,6 +127,17 @@ async def main() -> int:
 
         widget_observer = install_widget_shim(dispatcher)
         widget_observer.register(widget_handlers.on_widget_query)
+
+        async def log_extra_updates(update: Update) -> None:
+            """Пишем в лог неизвестные aiogram типы обновлений (например widget_query)."""
+            if update.model_extra:
+                logger.info(
+                    "update id=%s extra=%s",
+                    update.update_id,
+                    sorted(update.model_extra),
+                )
+
+        dispatcher.update.register(log_extra_updates)
 
         background: list[asyncio.Task] = []
 
