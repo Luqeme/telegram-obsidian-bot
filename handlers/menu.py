@@ -10,10 +10,10 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, ForceReply, Message
 
-from handlers.base import PENDING, cmd_help, cmd_money
+from handlers.base import PENDING, cmd_help
 from handlers.digest import _keyboard, cmd_today
 from handlers.notes import _undo_action
-from handlers.report import cmd_report
+from handlers.report import cmd_report, show_report_menu
 from handlers.menu_ui import main_menu
 from services import GitHubError, Services
 
@@ -44,9 +44,9 @@ async def on_menu(callback: CallbackQuery, services: Services) -> None:
 
     if action == "today":
         await cmd_today(message, services)
-    elif action == "money":
-        await cmd_money(message, services)
     elif action == "report":
+        await show_report_menu(message)
+    elif action == "money":
         await cmd_report(message, services)
     elif action == "undo":
         await _undo_action(callback.from_user.id, message, services)

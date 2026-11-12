@@ -6,10 +6,10 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 MENU_ROWS: tuple[tuple[tuple[str, str], ...], ...] = (
     (("🔎 Найти", "menu:find"), ("💬 Спросить", "menu:ask")),
-    (("📅 Сегодня", "menu:today"), ("💰 Деньги", "menu:money")),
-    (("📊 Отчёт", "menu:report"), ("🏠 Дома", "menu:home")),
-    (("📥 Инбокс", "menu:inbox"), ("🚀 Проекты", "menu:projects")),
-    (("↩️ Отменить", "menu:undo"), ("❓ Помощь", "menu:help")),
+    (("📅 Сегодня", "menu:today"), ("📊 Отчёт", "menu:report")),
+    (("🏠 Дома", "menu:home"), ("📥 Инбокс", "menu:inbox")),
+    (("🚀 Проекты", "menu:projects"), ("↩️ Отменить", "menu:undo")),
+    (("❓ Помощь", "menu:help"),),
 )
 
 

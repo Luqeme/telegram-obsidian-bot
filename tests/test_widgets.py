@@ -10,9 +10,11 @@ from services.money import summarize
 from services.widgets import (
     MAX_COMPRESSED,
     build_report_widget,
+    build_year_widget,
     compressed_size,
     report_caption,
     send_widget,
+    year_caption,
 )
 
 ROWS = [
@@ -73,6 +75,19 @@ def test_widget_escapes_category() -> None:
 
     assert "&lt;b&gt;злые&lt;/b&gt;" in markup
     assert "<b>злые</b>" not in markup
+
+
+def test_year_widget_contains_months_and_fits() -> None:
+    markup = build_year_widget(ROWS, 2026)
+
+    assert markup
+    assert "окт" in markup
+    assert compressed_size(markup) <= MAX_COMPRESSED
+    assert "90 000" in year_caption(ROWS, 2026)
+
+
+def test_year_widget_empty_year() -> None:
+    assert build_year_widget(ROWS, 2025) == ""
 
 
 def test_caption_contains_month_and_totals() -> None:

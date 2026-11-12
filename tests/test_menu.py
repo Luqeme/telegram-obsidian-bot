@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from handlers.menu_ui import main_menu
 from handlers.menu import _show_home, _show_projects
+from handlers.report import months_menu, report_menu
 
 
 class FakeMessage:
@@ -42,7 +43,6 @@ def test_menu_has_all_actions() -> None:
         "menu:find",
         "menu:ask",
         "menu:today",
-        "menu:money",
         "menu:report",
         "menu:home",
         "menu:inbox",
@@ -50,7 +50,35 @@ def test_menu_has_all_actions() -> None:
         "menu:undo",
         "menu:help",
     ]
-    assert all(len(row) == 2 for row in keyboard.inline_keyboard)
+    assert all(1 <= len(row) <= 2 for row in keyboard.inline_keyboard)
+
+
+def test_report_menu_has_four_periods() -> None:
+    keyboard = report_menu()
+    data = [
+        button.callback_data
+        for row in keyboard.inline_keyboard
+        for button in row
+    ]
+
+    assert data == ["rep:now", "rep:prev", "rep:months", "rep:year", "rep:main"]
+
+
+def test_months_menu_lists_months_with_data() -> None:
+    keyboard = months_menu(
+        [
+            {"date": "2026-11-01"},
+            {"date": "2026-10-01"},
+            {"date": "2026-10-02"},
+        ]
+    )
+    data = [
+        button.callback_data
+        for row in keyboard.inline_keyboard
+        for button in row
+    ]
+
+    assert data == ["rep:m:2026-11", "rep:m:2026-10", "rep:back"]
 
 
 def test_home_shows_open_household_tasks() -> None:

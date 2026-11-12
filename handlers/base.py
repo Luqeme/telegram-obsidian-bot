@@ -1,18 +1,17 @@
-"""Служебные команды: /start, /help, /id, /find, /ask, /money."""
+"""Служебные команды: /start, /help, /id, /find, /ask."""
 
 from __future__ import annotations
 
 import html
 import logging
 import re
-from datetime import datetime
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart, Filter
 from aiogram.types import ForceReply, Message
 
 from services import GitHubError, GroqError, Services
-from services.money import MONEY_PATH, format_rub, month_label, parse_rows, summarize
+from services.money import format_rub, month_label, summarize
 from handlers.menu_ui import main_menu
 
 router = Router(name="base")
@@ -70,9 +69,7 @@ async def cmd_help(message: Message) -> None:
         "/find <i>запрос</i> — поиск по заметкам\n"
         "/ask <i>вопрос</i> — ответ по содержимому базы\n"
         "/today — что сегодня, с кнопками закрытия задач\n"
-        "/money — доход и расход за месяц\n"
-        "/report — полный отчёт за месяц, с категориями и сравнением\n"
-        "/report text — отчёт обычным текстом, без виджета\n"
+        "/report — отчёт по деньгам: текущий, прошлый, месяц или год\n"
         "/report 2026-10 — отчёт за конкретный месяц\n"
         "/undo — отменить последнее сохранение, если бот ошибся\n"
         "/id — твой Telegram ID\n\n"
@@ -204,19 +201,6 @@ async def on_pending_reply(message: Message, services: Services) -> None:
         await _run_find(message, services, text)
     elif kind == "ask":
         await _run_ask(message, services, text)
-
-
-@router.message(Command("money"))
-async def cmd_money(message: Message, services: Services) -> None:
-    month = datetime.now(services.settings.tz).strftime("%Y-%m")
-    try:
-        raw = await services.github.get_text(MONEY_PATH)
-    except GitHubError as exc:
-        logger.error("money: %s", exc)
-        await message.answer(exc.user_message)
-        return
-
-    await message.answer(render_money(parse_rows(raw), month), parse_mode="HTML")
 
 
 def render_money(rows: list[dict], month: str) -> str:

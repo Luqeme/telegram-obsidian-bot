@@ -7,13 +7,27 @@ import zlib
 
 import httpx
 
-from .money import MonthSummary, format_rub, month_label
+from .money import MonthSummary, format_rub, month_label, summarize
 
 WIDGET_URL = "https://api.telegram.org/bot{token}/sendWidget"
 WIDGET_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 MAX_COMPRESSED = 4096
 MAX_CATEGORIES = 6
 MAX_EXPENSES = 3
+MONTH_SHORT = (
+    "янв",
+    "фев",
+    "мар",
+    "апр",
+    "май",
+    "июн",
+    "июл",
+    "авг",
+    "сен",
+    "окт",
+    "ноя",
+    "дек",
+)
 
 
 def compressed_size(markup: str) -> int:
@@ -76,6 +90,63 @@ def report_caption(summary: MonthSummary, month: str) -> str:
         f"📊 Отчёт за {month_label(month)} · "
         f"расход {format_rub(summary.expense)} ₽ · "
         f"доход {format_rub(summary.income)} ₽"
+    )
+
+
+def build_year_widget(rows: list[dict], year: int) -> str:
+    """Годовой виджет: 12 месяцев, полоски расходов."""
+    months = [summarize(rows, f"{year}-{number:02d}") for number in range(1, 13)]
+    income = sum(item.income for item in months)
+    expense = sum(item.expense for item in months)
+    balance = income - expense
+    if not any(item.count for item in months):
+        return ""
+
+    maximum = max((item.expense for item in months), default=0.0) or 1.0
+    bars: list[str] = []
+    for label, item in zip(MONTH_SHORT, months):
+        share = item.expense / maximum * 100
+        bars.append(
+            f'<div class="r"><span class="n">{label}</span>'
+            f'<span class="t"><i style="width:{share:.0f}%"></i></span>'
+            f'<span class="v">{format_rub(item.expense)}</span></div>'
+        )
+
+    markup = f"""
+<div class="w">
+  <div class="totals">
+    <div><span>Доход</span><b>{format_rub(income)} ₽</b></div>
+    <div><span>Расход</span><b>{format_rub(expense)} ₽</b></div>
+    <div><span>Остаток</span><b>{format_rub(balance)} ₽</b></div>
+  </div>
+  <div class="bars">{''.join(bars)}</div>
+</div>
+<style>
+.w{{font:14px system-ui,sans-serif;color:var(--tg-theme-text-color);padding:4px 2px}}
+.totals{{display:flex;gap:10px;margin-bottom:12px}}
+.totals div{{flex:1}}
+.totals span{{display:block;color:var(--tg-theme-hint-color);font-size:12px}}
+.r{{display:flex;align-items:center;gap:8px;margin:4px 0}}
+.n{{width:34px;font-size:12px;color:var(--tg-theme-hint-color)}}
+.t{{flex:1;height:7px;border-radius:4px;background:var(--tg-theme-secondary-bg-color);overflow:hidden}}
+.t i{{display:block;height:100%;border-radius:4px;background:var(--tg-theme-button-color)}}
+.v{{width:68px;text-align:right;font-size:12px;color:var(--tg-theme-hint-color)}}
+</style>
+"""
+    if compressed_size(markup) > MAX_COMPRESSED:
+        return ""
+    return markup
+
+
+def year_caption(
+    rows: list[dict], year: int
+) -> str:
+    months = [summarize(rows, f"{year}-{number:02d}") for number in range(1, 13)]
+    income = sum(item.income for item in months)
+    expense = sum(item.expense for item in months)
+    return (
+        f"📊 Отчёт за {year} год · расход {format_rub(expense)} ₽ · "
+        f"доход {format_rub(income)} ₽"
     )
 
 
