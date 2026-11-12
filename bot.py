@@ -19,6 +19,7 @@ from config import get_settings
 from handlers import base as base_handlers
 from handlers import digest as digest_handlers
 from handlers import health as health_handlers
+from handlers import menu as menu_handlers
 from handlers import notes as notes_handlers
 from handlers import report as report_handlers
 from middlewares.auth import AllowedUsersMiddleware
@@ -116,6 +117,7 @@ async def main() -> int:
         dispatcher.message.middleware(auth)
         dispatcher.callback_query.middleware(auth)
         dispatcher.include_router(base_handlers.router)
+        dispatcher.include_router(menu_handlers.router)
         dispatcher.include_router(digest_handlers.router)
         dispatcher.include_router(report_handlers.router)
         dispatcher.include_router(notes_handlers.router)
@@ -128,6 +130,7 @@ async def main() -> int:
                 await bot.set_my_commands(
                     [
                         BotCommand(command="start", description="Начать"),
+                        BotCommand(command="menu", description="Главное меню"),
                         BotCommand(command="help", description="Как это работает"),
                         BotCommand(command="find", description="Поиск по заметкам"),
                         BotCommand(command="ask", description="Вопрос к базе"),

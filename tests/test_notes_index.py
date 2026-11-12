@@ -132,6 +132,14 @@ def test_reads_note_type() -> None:
     assert note.note_type == "project"
 
 
+def test_reads_up_link() -> None:
+    raw = (
+        "---\ncreated: 2026-11-04T10:00:00\ntitle: \"Заметка\"\n"
+        'up: "[[Бот]]"\n---\n\n# Заметка\n'
+    )
+    assert parse_note("20_Projects/Заметка.md", raw).up == "Бот"
+
+
 def test_reads_project_metadata() -> None:
     raw = (
         '---\ntype: project\ntitle: "Shot Bot"\n'

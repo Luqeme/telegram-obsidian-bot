@@ -59,6 +59,7 @@ class NoteInfo:
     note_type: str = ""
     aliases: tuple[str, ...] = ()
     description: str = ""
+    up: str = ""
 
     @property
     def stem(self) -> str:
@@ -149,6 +150,14 @@ def parse_note(path: str, raw: str) -> NoteInfo:
         aliases_raw = [aliases_raw]
     aliases = tuple(str(item).strip() for item in aliases_raw if str(item).strip())
 
+    up_raw = meta.get("up") or ""
+    if isinstance(up_raw, list):
+        up_raw = up_raw[0] if up_raw else ""
+    up = str(up_raw).strip()
+    if up.startswith("[[") and up.endswith("]]"):
+        up = up[2:-2]
+    up = up.split("|")[0].strip()
+
     return NoteInfo(
         path=path,
         title=str(title),
@@ -160,6 +169,7 @@ def parse_note(path: str, raw: str) -> NoteInfo:
         note_type=str(meta.get("type") or ""),
         aliases=aliases,
         description=str(meta.get("description") or "").strip(),
+        up=up,
     )
 
 

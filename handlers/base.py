@@ -13,6 +13,7 @@ from aiogram.types import ForceReply, Message
 
 from services import GitHubError, GroqError, Services
 from services.money import MONEY_PATH, format_rub, month_label, parse_rows, summarize
+from handlers.menu_ui import main_menu
 
 router = Router(name="base")
 logger = logging.getLogger(__name__)
@@ -44,15 +45,8 @@ async def cmd_start(message: Message) -> None:
         "👋 Привет!\n\n"
         "Кидай сюда мысль текстом или голосовым — я разберу её на тезисы, "
         "теги и задачи и сохраню заметку в Obsidian.\n\n"
-        "Команды:\n"
-        "/find — поиск по базе\n"
-        "/ask — вопрос к базе\n"
-        "/today — сводка на сегодня\n"
-        "/money — деньги за месяц\n"
-        "/report — отчёт за месяц (или /report 2026-10)\n"
-        "/undo — отменить последнюю заметку, трату или задачу\n"
-        "/id — твой Telegram ID\n"
-        "/help — как это работает"
+        "Или выбери действие:",
+        reply_markup=main_menu(),
     )
 
 
@@ -72,13 +66,15 @@ async def cmd_help(message: Message) -> None:
         "• определяю проект по названию или алиасу хаба;\n"
         "• после сохранения можно сразу отправить в проект, архив или удалить.\n\n"
         "<b>Команды</b>\n"
+        "/menu — главное меню\n"
         "/find <i>запрос</i> — поиск по заметкам\n"
         "/ask <i>вопрос</i> — ответ по содержимому базы\n"
         "/today — что сегодня, с кнопками закрытия задач\n"
         "/money — доход и расход за месяц\n"
         "/report — полный отчёт за месяц, с категориями и сравнением\n"
         "/report 2026-10 — отчёт за конкретный месяц\n"
-        "/undo — отменить последнее сохранение, если бот ошибся\n\n"
+        "/undo — отменить последнее сохранение, если бот ошибся\n"
+        "/id — твой Telegram ID\n\n"
         "Деньги: «потратил 540 на обед», «заработал 5000» — запишу в отдельный файл.\n\n"
         "Если что-то сломалось — пришлю текст обратно, ничего не потеряется.",
         parse_mode="HTML",

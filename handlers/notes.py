@@ -93,13 +93,20 @@ def check_voice_limits(size: int, duration: int, limit_mb: int) -> str | None:
 
 
 @router.message(Command("undo"))
+@router.message(Command("undo"))
 async def cmd_undo(message: Message, services: Services) -> None:
-    """Откатывает последнее сохранение: заметку, транзакцию или бытовую задачу."""
     user = message.from_user
     if user is None:
         return
+    await _undo_action(user.id, message, services)
 
-    action = UNDO.pop(user.id)
+
+async def _undo_action(user_id: int, message: Message, services: Services) -> None:
+    """Откатывает последнее сохранение: заметку, транзакцию или бытовую задачу."""
+    if not user_id:
+        return
+
+    action = UNDO.pop(user_id)
     if action is None:
         await message.answer("↩️ Нечего отменять.")
         return
@@ -169,7 +176,7 @@ async def cmd_undo(message: Message, services: Services) -> None:
             f"↩️ Отменено: {html.escape(action.label)} (строк: {removed})."
         )
     except GitHubError as exc:
-        UNDO.push(user.id, action)
+        UNDO.push(user_id, action)
         logger.error("undo: %s", exc)
         await message.answer(exc.user_message)
 
