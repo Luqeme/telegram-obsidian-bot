@@ -29,7 +29,8 @@ PRIORITY_MARKS = ("⏫", "🔼", "🔽")
 DEFAULT_TTL = 600
 MAX_FILES = 2000
 FETCH_CONCURRENCY = 6
-SKIP_NAMES = {"Dashboard.md", "Карта.md", "README.md"}
+SKIP_NAMES = {"Карта.md", "README.md"}
+SKIP_ROOT_NAMES = {"Dashboard.md"}
 SKIP_TYPES = {"project", "project-template", "money-categories"}
 
 STOPWORDS = frozenset(
@@ -296,6 +297,8 @@ class NotesIndex:
     @staticmethod
     def _skip(path: str) -> bool:
         pure = PurePosixPath(path)
+        if len(pure.parts) == 1 and pure.name in SKIP_ROOT_NAMES:
+            return True
         if pure.name in SKIP_NAMES:
             return True
         return any(part.startswith(".") for part in pure.parts)

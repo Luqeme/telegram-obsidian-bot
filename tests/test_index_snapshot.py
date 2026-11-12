@@ -143,6 +143,27 @@ def test_truncation_cleared_when_fits(monkeypatch: pytest.MonkeyPatch) -> None:
     assert index.truncated is None
 
 
+def test_dashboard_project_hub_is_indexed() -> None:
+    hub = '---\ntype: project\ntitle: "Dashboard"\n---\n\n# Dashboard\n'
+    github = SnapshotGitHub(
+        {
+            "Dashboard.md": "# 🧠 База знаний",
+            "20_Projects/Dashboard.md": hub,
+            "10_Notes/a.md": NOTE,
+        }
+    )
+
+    async def go():
+        index = NotesIndex(github)
+        notes = await index.notes()
+        return index, notes
+
+    index, notes = run(go())
+
+    assert [note.title for note in notes] == ["Заметка"]
+    assert [project.title for project in index._projects] == ["Dashboard"]
+
+
 def test_project_hub_is_not_in_search_index() -> None:
     hub = '---\ntype: project\ntitle: "Бот"\n---\n\n# Бот\n'
     github = SnapshotGitHub({"20_Projects/Бот.md": hub, "10_Notes/a.md": NOTE})
