@@ -132,6 +132,40 @@ def test_today_state_payload() -> None:
     assert state["t"][1]["d"] == "13.11"
 
 
+def test_today_state_fits_chat_data_limit() -> None:
+    from types import SimpleNamespace
+
+    from handlers.digest import CHAT_DATA_LIMIT, build_today_state, dumps_state
+
+    tasks = [
+        SimpleNamespace(
+            id=f"id{index}",
+            raw="Очень длинная задача " * 5,
+            text="Очень длинная задача " * 5,
+            due="",
+        )
+        for index in range(6)
+    ]
+
+    state = build_today_state(
+        {
+            "today_notes": [],
+            "inbox": [],
+            "tasks": tasks,
+            "ordered": tasks,
+            "overdue": [],
+            "due_today": [],
+            "expense": 0,
+            "income": 0,
+            "truncated": None,
+        }
+    )
+
+    assert len(dumps_state(state).encode("utf-8")) <= CHAT_DATA_LIMIT
+    assert len(state["t"]) < len(tasks)
+    assert all(len(task["x"]) <= 42 for task in state["t"])
+
+
 def test_weekly_widget_contains_review() -> None:
     review = WeeklyReview(
         period="06.11–12.11",

@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime
 
 from services import GitHubError, Services
 from services.widget_shim import WidgetQuery, answer_widget_query, edit_widget_data
 
-from .digest import build_today_state, collect_today
+from .digest import build_today_state, collect_today, dumps_state
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +85,7 @@ async def _refresh_today(services: Services, token: str, query: WidgetQuery) -> 
         token,
         query.chat.id,
         query.message_id,
-        json.dumps(state, ensure_ascii=False),
+        dumps_state(state),
     )
     if not ok:
         logger.warning("widget today refresh failed chat=%s", query.chat.id)

@@ -83,14 +83,21 @@ def build_today_widget() -> str:
 <div id="w" class="w"></div>
 <script>
 const root = document.getElementById('w');
+let last = null;
 function esc(v) { const d = document.createElement('div'); d.textContent = String(v ?? ''); return d.innerHTML; }
-function render() {
+def render() {
   let s = {};
   const raw = TelegramWidget.chatData;
-  if (raw && typeof raw === 'object') {
+  if (!raw) {
+    root.textContent = 'Загрузка…';
+    return;
+  }
+  if (raw === last) return;
+  last = raw;
+  if (typeof raw === 'object') {
     s = raw;
   } else {
-    try { s = JSON.parse(raw || '{}'); } catch (e) {}
+    try { s = JSON.parse(raw); } catch (e) { return; }
   }
   let h = '<div class="stats">';
   h += '<div><span>Задач</span><b>' + (s.o || 0) + '</b></div>';
@@ -117,8 +124,9 @@ function render() {
     };
   });
 }
-TelegramWidget.onEvent('chatDataChanged', render);
+try { TelegramWidget.onEvent('chatDataChanged', render); } catch (e) {}
 render();
+setInterval(render, 1500);
 </script>
 <style>
 .w{font:14px system-ui,sans-serif;color:var(--tg-theme-text-color);padding:4px 2px}

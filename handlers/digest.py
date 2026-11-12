@@ -29,6 +29,9 @@ router = Router(name="digest")
 
 MAX_BUTTONS = 6
 BUTTON_LABEL = 40
+STATE_TASKS = 5
+STATE_TEXT = 42
+CHAT_DATA_LIMIT = 1024
 
 
 @router.message(Command("today"))
@@ -48,7 +51,7 @@ async def cmd_today(message: Message, services: Services) -> None:
             markup,
             f"📅 Сегодня, {data['now']:%d.%m}",
             allow_queries=True,
-            chat_data=json.dumps(build_today_state(data), ensure_ascii=False),
+            chat_data=dumps_state(build_today_state(data)),
         )
         if ok:
             return
@@ -121,12 +124,15 @@ def build_today_state(data: dict) -> dict:
     overdue_ids = {task.id for task in data["overdue"]}
     due_ids = {task.id for task in data["due_today"]}
     tasks = []
-    for task in data["ordered"][:MAX_BUTTONS]:
+    for task in data["ordered"][:STATE_TASKS]:
         due = task.due or ""
+        text = task.text
+        if len(text) > STATE_TEXT:
+            text = text[: STATE_TEXT - 1].rstrip() + "…"
         tasks.append(
             {
                 "i": task.id,
-                "x": task.text[:60],
+                "x": text,
                 "d": f"{due[8:10]}.{due[5:7]}" if due else "",
                 "k": "⏳" if task.id in overdue_ids else "📅" if task.id in due_ids else "•",
             }
@@ -138,7 +144,7 @@ def build_today_state(data: dict) -> dict:
     if data["income"]:
         parts.append(f"+{format_rub(data['income'])} ₽")
 
-    return {
+    state = {
         "n": len(data["today_notes"]),
         "in": len(data["inbox"]),
         "o": len(data["tasks"]),
@@ -147,6 +153,16 @@ def build_today_state(data: dict) -> dict:
         "m": " · ".join(parts),
         "t": tasks,
     }
+
+    # chat_data ограничен 1024 байтами: убираем задачи, пока не влезем.
+    while state["t"] and len(dumps_state(state).encode("utf-8")) > CHAT_DATA_LIMIT:
+        state["t"].pop()
+
+    return state
+
+
+def dumps_state(state: dict) -> str:
+    return json.dumps(state, ensure_ascii=False)
 
 
 def render_today_text(data: dict) -> str:
