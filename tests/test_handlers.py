@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
+
+from aiogram.types import Message
 
 from handlers.notes import (
     MAX_AUDIO_SECONDS,
@@ -11,6 +14,7 @@ from handlers.notes import (
     _match_target,
     check_voice_limits,
 )
+from handlers import menu as menu_handlers
 
 LIMIT_MB = 20
 
@@ -194,3 +198,36 @@ def test_money_fields_default_to_none() -> None:
     assert draft.money_kind == "none"
     assert draft.money_amount == 0
     assert draft.money_category == ""
+
+
+def test_menu_report_opens_widget_directly() -> None:
+    calls: list[tuple[Message, object]] = []
+    original = menu_handlers.cmd_report
+
+    async def fake_report(message, services) -> None:
+        calls.append((message, services))
+
+    async def answer(*args, **kwargs) -> bool:
+        return True
+
+    message = Message.model_validate(
+        {
+            "message_id": 1,
+            "date": 0,
+            "chat": {"id": 2, "type": "private"},
+        }
+    )
+    callback = SimpleNamespace(
+        data="menu:report",
+        message=message,
+        from_user=SimpleNamespace(id=2),
+        answer=answer,
+    )
+
+    menu_handlers.cmd_report = fake_report
+    try:
+        asyncio.run(menu_handlers.on_menu(callback, "services"))
+    finally:
+        menu_handlers.cmd_report = original
+
+    assert calls == [(message, "services")]
