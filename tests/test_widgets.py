@@ -10,6 +10,7 @@ from services.money import summarize
 from services.widgets import (
     MAX_COMPRESSED,
     WeeklyReview,
+    build_report_shell,
     build_report_widget,
     build_today_widget,
     build_weekly_widget,
@@ -222,6 +223,106 @@ def test_year_widget_contains_months_and_fits() -> None:
 
 def test_year_widget_empty_year() -> None:
     assert build_year_widget(ROWS, 2025) == ""
+
+
+def test_report_shell_is_stateful_and_fits() -> None:
+    import re
+
+    markup = build_report_shell()
+
+    assert markup
+    assert "TelegramWidget.chatData" in markup
+    assert "chatDataChanged" in markup
+    assert "report:current" in markup
+    assert "report:months:" in markup
+    assert 'request(d)' in markup
+    assert compressed_size(markup) <= MAX_COMPRESSED
+
+    script = re.search(r"<script>(.*?)</script>", markup, re.S)
+    assert script is not None
+    assert not re.search(r"^\s*def\s+\w+\s*\(", script.group(1), re.M)
+
+
+def test_report_month_state() -> None:
+    from datetime import datetime, timezone
+
+    from handlers.report import report_state
+
+    now = datetime(2026, 10, 15, tzinfo=timezone.utc)
+    state = report_state(ROWS, "current", now)
+
+    assert state["k"] == "m"
+    assert state["v"] == "2026-10"
+    assert state["i"] == 90000
+    assert state["e"] == 27000
+    assert state["b"] == 63000
+    assert state["a"] == "current"
+    assert state["r"][0] == ["Аренда", 25000, 93]
+
+
+def test_report_state_navigation() -> None:
+    from datetime import datetime, timezone
+
+    from handlers.report import report_state
+
+    now = datetime(2026, 11, 15, tzinfo=timezone.utc)
+
+    prev = report_state(ROWS, "prev", now)
+    assert prev["v"] == "2026-10"
+    assert prev["a"] == "prev"
+
+    old = report_state(ROWS, "mon:2026-09", now)
+    assert old["v"] == "2026-09"
+    assert old["a"] == "month"
+    assert old["e"] == 0
+
+    assert report_state(ROWS, "mp:2026-01", now)["v"] == "2025-12"
+    assert report_state(ROWS, "mn:2026-12", now)["v"] == "2027-01"
+
+
+def test_report_year_and_months_states() -> None:
+    from datetime import datetime, timezone
+
+    from handlers.report import report_state
+
+    now = datetime(2026, 11, 15, tzinfo=timezone.utc)
+
+    year = report_state(ROWS, "year:2026", now)
+    assert year["k"] == "y"
+    assert year["y"] == 2026
+    assert year["e"] == 27000
+    assert year["a"] == "year"
+    assert [row[0] for row in year["r"]] == ["окт"]
+    assert report_state(ROWS, "yp:2026", now)["y"] == 2025
+    assert report_state(ROWS, "yn:2026", now)["y"] == 2027
+
+    months = report_state(ROWS, "months:2026", now)
+    assert months["k"] == "l"
+    assert months["y"] == 2026
+    assert months["d"] == "000000000100"
+    assert months["a"] == "month"
+
+
+def test_report_state_fits_chat_data_limit() -> None:
+    from datetime import datetime, timezone
+
+    from handlers.report import REPORT_STATE_LIMIT, dumps_report_state, report_state
+
+    rows = [
+        {
+            "date": "2026-10-01",
+            "kind": "expense",
+            "amount": "1000",
+            "category": f"Очень длинная категория {index}",
+            "note": "",
+        }
+        for index in range(8)
+    ]
+    state = report_state(rows, "mon:2026-10", datetime(2026, 11, 1, tzinfo=timezone.utc))
+    payload = dumps_report_state(state)
+
+    assert len(payload.encode("utf-8")) <= REPORT_STATE_LIMIT
+    assert len(state["r"]) < 8
 
 
 def test_caption_is_short() -> None:

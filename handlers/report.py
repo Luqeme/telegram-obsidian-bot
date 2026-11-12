@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -29,11 +30,9 @@ from services.money import (
     summarize,
 )
 from services.widgets import (
-    build_report_widget,
-    build_year_widget,
-    report_caption,
+    MONTH_SHORT,
+    build_report_shell,
     send_widget,
-    year_caption,
 )
 
 router = Router(name="report")
@@ -43,11 +42,15 @@ MAIN_TEXT = "Главное меню:"
 REPORT_TEXT = "📊 <b>Отчёт</b>\n\nВыбери период:"
 MONTHS_TEXT = "📅 <b>Выбери месяц</b>"
 MONTHS_LIMIT = 12
+REPORT_CAPTION = "📊 Отчёт по деньгам"
+REPORT_STATE_LIMIT = 1024
+REPORT_ROWS = 6
 
 
 @router.message(Command("report"))
 async def cmd_report(message: Message, services: Services) -> None:
-    month = datetime.now(services.settings.tz).strftime("%Y-%m")
+    now = datetime.now(services.settings.tz)
+    view = "current"
     argument = (message.text or "").partition(" ")[2].strip()
     if argument:
         month = _parse_month(argument)
@@ -57,14 +60,14 @@ async def cmd_report(message: Message, services: Services) -> None:
                 parse_mode="HTML",
             )
             return
-    await _send_month_report(message, services, month)
+        view = f"mon:{month}"
+    await _send_report(message, services, view)
 
 
 @router.message(Command("money"))
 async def cmd_money(message: Message, services: Services) -> None:
     """Старый /money оставлен алиасом, чтобы не ломать привычку."""
-    month = datetime.now(services.settings.tz).strftime("%Y-%m")
-    await _send_month_report(message, services, month)
+    await _send_report(message, services, "current")
 
 
 @router.callback_query(F.data.startswith("rep:"))
@@ -79,32 +82,23 @@ async def on_report(callback: CallbackQuery, services: Services) -> None:
     await callback.answer()
 
     if action == "now":
-        await _send_month_report(
-            message,
-            services,
-            datetime.now(services.settings.tz).strftime("%Y-%m"),
-        )
+        await _send_report(message, services, "current")
         return
     if action == "prev":
-        month = previous_month(
-            datetime.now(services.settings.tz).strftime("%Y-%m")
-        )
-        await _send_month_report(message, services, month)
+        await _send_report(message, services, "prev")
         return
     if action == "year":
-        await _send_year_report(
-            message, services, datetime.now(services.settings.tz).year
+        await _send_report(
+            message,
+            services,
+            f"year:{datetime.now(services.settings.tz).year}",
         )
         return
     if action == "months":
-        try:
-            rows = await _read_money(services)
-        except GitHubError as exc:
-            logger.error("report months: %s", exc)
-            await message.answer(exc.user_message)
-            return
-        await _edit(
-            message, MONTHS_TEXT, months_menu(rows)
+        await _send_report(
+            message,
+            services,
+            f"months:{datetime.now(services.settings.tz).year}",
         )
         return
     if action == "back":
@@ -116,7 +110,7 @@ async def on_report(callback: CallbackQuery, services: Services) -> None:
     if action.startswith("m:"):
         month = _parse_month(action[2:])
         if month is not None:
-            await _send_month_report(message, services, month)
+            await _send_report(message, services, f"mon:{month}")
         return
 
     await message.answer("Неизвестный пункт отчёта.")
@@ -189,8 +183,8 @@ async def report_loop(bot: Bot, services: Services) -> None:
         await asyncio.sleep(61)
 
 
-async def _send_month_report(
-    message: Message, services: Services, month: str
+async def _send_report(
+    message: Message, services: Services, view: str
 ) -> None:
     try:
         rows = await _read_money(services)
@@ -198,19 +192,188 @@ async def _send_month_report(
         logger.error("report: %s", exc)
         await message.answer(exc.user_message)
         return
-    await _send_month_widget(message.bot, message.chat.id, services, rows, month)
+    await _send_report_state(message.bot, message.chat.id, services, rows, view)
+
+
+def report_state(
+    rows: list[dict], view: str, now: datetime
+) -> dict:
+    """Состояние виджета отчёта для вида ``current``/``prev``/``mon:``/``year:``..."""
+    now_month = now.strftime("%Y-%m")
+    parts = view.split(":")
+    kind = parts[0]
+    argument = parts[1] if len(parts) > 1 else ""
+
+    if kind == "current":
+        return _month_state(rows, now_month, now_month)
+    if kind == "prev":
+        return _month_state(rows, previous_month(now_month), now_month)
+    if kind == "months":
+        return _months_state(rows, _year(argument, now.year))
+    if kind == "year":
+        return _year_state(rows, _year(argument, now.year), now.year)
+    if kind == "mon":
+        month = _parse_month(argument) or now_month
+        return _month_state(rows, month, now_month)
+    if kind in ("mp", "mn"):
+        month = _parse_month(argument) or now_month
+        shift = -1 if kind == "mp" else 1
+        return _month_state(rows, _shift_month(month, shift), now_month)
+    if kind in ("yp", "yn"):
+        year = _year(argument, now.year)
+        return _year_state(rows, year + (-1 if kind == "yp" else 1), now.year)
+    return _month_state(rows, now_month, now_month)
+
+
+def _month_state(rows: list[dict], month: str, now_month: str) -> dict:
+    summary = summarize(rows, month)
+    total = summary.expense or 1.0
+    items = [
+        [category, round(amount), round(amount / total * 100)]
+        for category, amount in summary.expense_categories[:REPORT_ROWS]
+    ]
+    if month == now_month:
+        active = "current"
+    elif month == previous_month(now_month):
+        active = "prev"
+    else:
+        active = "month"
+    return {
+        "k": "m",
+        "v": month,
+        "y": int(month[:4]),
+        "t": month_label(month),
+        "i": round(summary.income),
+        "e": round(summary.expense),
+        "b": round(summary.balance),
+        "r": items,
+        "a": active,
+    }
+
+
+def _year_state(rows: list[dict], year: int, now_year: int) -> dict:
+    months = [summarize(rows, f"{year}-{number:02d}") for number in range(1, 13)]
+    income = sum(item.income for item in months)
+    expense = sum(item.expense for item in months)
+    maximum = max((item.expense for item in months), default=0.0) or 1.0
+    items = [
+        [MONTH_SHORT[index], round(item.expense), round(item.expense / maximum * 100)]
+        for index, item in enumerate(months)
+        if item.count
+    ]
+    return {
+        "k": "y",
+        "v": str(year),
+        "y": year,
+        "t": f"{year} год",
+        "i": round(income),
+        "e": round(expense),
+        "b": round(income - expense),
+        "r": items,
+        "a": "year" if year == now_year else "",
+    }
+
+
+def _months_state(rows: list[dict], year: int) -> dict:
+    counts = [summarize(rows, f"{year}-{number:02d}").count for number in range(1, 13)]
+    return {
+        "k": "l",
+        "v": str(year),
+        "y": year,
+        "t": f"Выбери месяц · {year}",
+        "i": 0,
+        "e": 0,
+        "b": 0,
+        "r": [],
+        "a": "month",
+        "d": "".join("1" if count else "0" for count in counts),
+    }
+
+
+def dumps_report_state(state: dict) -> str:
+    """JSON состояния; подрезает строки, чтобы влезть в лимит chat_data."""
+    state = dict(state)
+    state["r"] = [list(row) for row in state.get("r", [])]
+    payload = json.dumps(state, ensure_ascii=False)
+    while state["r"] and len(payload.encode("utf-8")) > REPORT_STATE_LIMIT:
+        state["r"].pop()
+        payload = json.dumps(state, ensure_ascii=False)
+    return payload
+
+
+def _year(value: str, default: int) -> int:
+    if value.isdigit() and 2000 <= int(value) <= 2100:
+        return int(value)
+    return default
+
+
+def _shift_month(month: str, delta: int) -> str:
+    year, number = (int(part) for part in month.split("-"))
+    index = year * 12 + (number - 1) + delta
+    return f"{index // 12:04d}-{index % 12 + 1:02d}"
+
+
+async def read_money(services: Services) -> list[dict]:
+    raw = await services.github.get_text(MONEY_PATH)
+    return parse_rows(raw)
+
+
+async def _send_report_state(
+    bot: Bot,
+    chat_id: int,
+    services: Services,
+    rows: list[dict],
+    view: str,
+) -> None:
+    state = report_state(rows, view, datetime.now(services.settings.tz))
+    markup = build_report_shell()
+    if markup:
+        ok, reason = await send_widget(
+            services.settings.telegram_bot_token,
+            chat_id,
+            markup,
+            REPORT_CAPTION,
+            allow_queries=True,
+            chat_data=dumps_report_state(state),
+        )
+        if ok:
+            logger.info("report_widget view=%s", view)
+            return
+        logger.warning("report_widget: %s", reason)
+
+    if state["k"] == "l":
+        await bot.send_message(
+            chat_id,
+            MONTHS_TEXT,
+            parse_mode="HTML",
+            reply_markup=months_menu(rows),
+        )
+    elif state["k"] == "y":
+        await bot.send_message(
+            chat_id,
+            render_year(rows, state["y"]),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+    else:
+        await bot.send_message(
+            chat_id,
+            render_report(rows, state["v"]),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+
+
+async def _send_month_report(
+    message: Message, services: Services, month: str
+) -> None:
+    await _send_report(message, services, f"mon:{month}")
 
 
 async def _send_year_report(
     message: Message, services: Services, year: int
 ) -> None:
-    try:
-        rows = await _read_money(services)
-    except GitHubError as exc:
-        logger.error("report year: %s", exc)
-        await message.answer(exc.user_message)
-        return
-    await _send_year_widget(message.bot, message.chat.id, services, rows, year)
+    await _send_report(message, services, f"year:{year}")
 
 
 async def _send_month_widget(
@@ -220,26 +383,7 @@ async def _send_month_widget(
     rows: list[dict],
     month: str,
 ) -> None:
-    summary = summarize(rows, month)
-    if summary.count:
-        markup = build_report_widget(summary, month)
-        if markup:
-            ok, reason = await send_widget(
-                services.settings.telegram_bot_token,
-                chat_id,
-                markup,
-                report_caption(month),
-            )
-            if ok:
-                logger.info("report_widget month=%s", month)
-                return
-            logger.warning("report_widget: %s", reason)
-    await bot.send_message(
-        chat_id,
-        render_report(rows, month),
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-    )
+    await _send_report_state(bot, chat_id, services, rows, f"mon:{month}")
 
 
 async def _send_year_widget(
@@ -249,24 +393,7 @@ async def _send_year_widget(
     rows: list[dict],
     year: int,
 ) -> None:
-    markup = build_year_widget(rows, year)
-    if markup:
-        ok, reason = await send_widget(
-            services.settings.telegram_bot_token,
-            chat_id,
-            markup,
-            year_caption(year),
-        )
-        if ok:
-            logger.info("report_widget year=%s", year)
-            return
-        logger.warning("report_year_widget: %s", reason)
-    await bot.send_message(
-        chat_id,
-        render_year(rows, year),
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-    )
+    await _send_report_state(bot, chat_id, services, rows, f"year:{year}")
 
 
 def render_report(rows: list[dict], month: str) -> str:
@@ -358,9 +485,7 @@ def _category_lines(summary: MonthSummary) -> list[str]:
 
 
 async def _read_money(services: Services) -> list[dict]:
-    raw = await services.github.get_text(MONEY_PATH)
-    return parse_rows(raw)
-
+    return await read_money(services)
 
 async def _edit(
     message: Message, text: str, markup: InlineKeyboardMarkup | None

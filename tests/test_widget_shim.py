@@ -203,3 +203,80 @@ def test_handler_closes_task_and_updates_widget() -> None:
     assert services.index.invalidated is True
     assert calls["replace"][0] == "Tasks.md"
 
+
+def test_handler_switches_report_period() -> None:
+    import zoneinfo
+
+    from handlers import widgets as widget_handlers
+
+    calls: dict[str, object] = {}
+    edits: list[tuple] = []
+
+    async def fake_read(_services) -> list[dict]:
+        return [{"date": "2026-10-01"}]
+
+    def fake_state(rows, view, now) -> dict:
+        calls["view"] = view
+        calls["rows"] = rows
+        calls["now"] = now
+        return {"k": "m", "v": view}
+
+    def fake_dump(state) -> str:
+        calls["state"] = state
+        return json.dumps(state)
+
+    async def fake_answer(token, query_id, data="", **kwargs) -> bool:
+        calls["answer"] = (token, query_id, data)
+        return True
+
+    async def fake_edit(token, chat_id, message_id, chat_data, **kwargs) -> bool:
+        edits.append((token, chat_id, message_id, chat_data))
+        return True
+
+    originals = (
+        widget_handlers.read_money,
+        widget_handlers.report_state,
+        widget_handlers.dumps_report_state,
+        widget_handlers.answer_widget_query,
+        widget_handlers.edit_widget_data,
+    )
+    widget_handlers.read_money = fake_read
+    widget_handlers.report_state = fake_state
+    widget_handlers.dumps_report_state = fake_dump
+    widget_handlers.answer_widget_query = fake_answer
+    widget_handlers.edit_widget_data = fake_edit
+    try:
+        settings = type(
+            "Settings",
+            (),
+            {
+                "telegram_bot_token": "token",
+                "allowed_user_ids": [2],
+                "tz": zoneinfo.ZoneInfo("UTC"),
+            },
+        )()
+        services = type("S", (), {"settings": settings})()
+        query = WidgetQuery.model_validate(
+            {
+                "id": "q1",
+                "from": {"id": 2, "is_bot": False, "first_name": "A"},
+                "data": "report:mon:2026-10",
+                "chat": {"id": 2, "type": "private"},
+                "message_id": 10,
+            }
+        )
+
+        asyncio.run(widget_handlers.on_widget_query(query, services))
+    finally:
+        (
+            widget_handlers.read_money,
+            widget_handlers.report_state,
+            widget_handlers.dumps_report_state,
+            widget_handlers.answer_widget_query,
+            widget_handlers.edit_widget_data,
+        ) = originals
+
+    assert calls["view"] == "mon:2026-10"
+    assert calls["answer"] == ("token", "q1", "ok")
+    assert edits == [("token", 2, 10, json.dumps({"k": "m", "v": "mon:2026-10"}))]
+

@@ -9,8 +9,11 @@ from services import GitHubError, Services
 from services.widget_shim import WidgetQuery, answer_widget_query, edit_widget_data
 
 from .digest import build_today_state, collect_today, dumps_state
+from .report import dumps_report_state, read_money, report_state
 
 logger = logging.getLogger(__name__)
+
+REPORT_PREFIX = "report:"
 
 
 async def on_widget_query(query: WidgetQuery, services: Services) -> None:
@@ -25,6 +28,9 @@ async def on_widget_query(query: WidgetQuery, services: Services) -> None:
         data = query.data or ""
         if data.startswith("done:"):
             await _close_task(services, token, query, data[5:])
+            return
+        if data.startswith(REPORT_PREFIX):
+            await _report(services, token, query, data[len(REPORT_PREFIX):])
             return
 
         await answer_widget_query(token, query.id, "unknown")
@@ -89,3 +95,32 @@ async def _refresh_today(services: Services, token: str, query: WidgetQuery) -> 
     )
     if not ok:
         logger.warning("widget today refresh failed chat=%s", query.chat.id)
+
+
+async def _report(
+    services: Services, token: str, query: WidgetQuery, view: str
+) -> None:
+    """Переключает период отчёта внутри того же сообщения."""
+    if query.chat is None or query.message_id is None:
+        await answer_widget_query(token, query.id, "missing")
+        return
+
+    await answer_widget_query(token, query.id, "ok")
+
+    try:
+        rows = await read_money(services)
+        state = report_state(
+            rows, view, datetime.now(services.settings.tz)
+        )
+    except GitHubError as exc:
+        logger.error("widget report: %s", exc)
+        return
+
+    ok = await edit_widget_data(
+        token,
+        query.chat.id,
+        query.message_id,
+        dumps_report_state(state),
+    )
+    if not ok:
+        logger.warning("widget report refresh failed chat=%s", query.chat.id)
