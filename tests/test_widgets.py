@@ -52,6 +52,7 @@ def test_widget_contains_totals_and_categories() -> None:
     assert "Еда" in markup
     assert "Крупные траты" in markup
     assert "25 000" in markup
+    assert "Квартира" in markup
     assert 'class="t"' in markup
 
 

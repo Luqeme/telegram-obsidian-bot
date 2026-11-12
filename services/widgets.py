@@ -34,6 +34,15 @@ def compressed_size(markup: str) -> int:
     return len(zlib.compress(markup.encode("utf-8"), 9))
 
 
+def _note_suffix(note: str) -> str:
+    text = " ".join(str(note or "").split())
+    if not text:
+        return ""
+    if len(text) > 60:
+        text = text[:59].rstrip() + "…"
+    return f'<span class="note">{html.escape(text)}</span>'
+
+
 def build_report_widget(summary: MonthSummary, month: str) -> str:
     """HTML виджета. Пустая строка, если не влез в лимит Telegram."""
     total = summary.expense or 1.0
@@ -50,7 +59,7 @@ def build_report_widget(summary: MonthSummary, month: str) -> str:
 
     expenses = "".join(
         f'<div class="e"><b>{format_rub(item["amount"])} ₽</b> '
-        f'{html.escape(item["category"])}</div>'
+        f'{html.escape(item["category"])}{_note_suffix(item["note"])}</div>'
         for item in summary.top_expenses[:MAX_EXPENSES]
     )
 
@@ -79,6 +88,7 @@ def build_report_widget(summary: MonthSummary, month: str) -> str:
 .h{{font-size:12px;color:var(--tg-theme-hint-color);margin-bottom:4px}}
 .e{{font-size:12px;color:var(--tg-theme-hint-color);margin:3px 0}}
 .e b{{color:var(--tg-theme-text-color)}}
+.note{{display:block;font-size:11px;color:var(--tg-theme-hint-color);margin-top:1px}}
 </style>
 """
     if compressed_size(markup) > MAX_COMPRESSED:
