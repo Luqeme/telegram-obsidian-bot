@@ -159,6 +159,11 @@ def test_no_tasks_key_when_llm_says_not_meaningful() -> None:
     assert draft.is_meaningful is False
 
 
+def test_empty_title_is_allowed_for_meaningless_input() -> None:
+    draft = NoteDraft(is_meaningful=False, title="", category="Задача")
+    assert draft.title == ""
+
+
 def test_draft_carries_project_and_schema_requires_it() -> None:
     from prompts import NOTE_DRAFT_SCHEMA
 

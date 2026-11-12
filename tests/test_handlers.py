@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from handlers.notes import (
     MAX_AUDIO_SECONDS,
+    _fallback_title,
     _find_open_task,
     _match_target,
     check_voice_limits,
@@ -57,6 +58,13 @@ def test_project_matches_title_or_alias() -> None:
     assert _match_target("бот", hubs).title == "Бот"
     assert _match_target("несуществующий", hubs) is None
     assert _match_target("", hubs) is None
+
+
+def test_fallback_title_uses_first_words() -> None:
+    assert _fallback_title("Купить молоко завтра утром, а ещё позвонить в сервис.") == (
+        "Купить молоко завтра утром, а ещё позвонить"
+    )
+    assert _fallback_title("   ") == "Заметка"
 
 
 def test_find_open_task_by_past_tense() -> None:

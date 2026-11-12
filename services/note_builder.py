@@ -78,7 +78,7 @@ class NoteDraft(BaseModel):
     """То, что вернула LLM. Ни одного поля, которое придумывает код."""
 
     is_meaningful: bool = True
-    title: str = Field(min_length=1)
+    title: str = ""
     category: Category
     tags: list[str] = Field(default_factory=list)
     summary: str = ""
@@ -106,8 +106,6 @@ class NoteDraft(BaseModel):
         value = value.lstrip("#").strip()
         value = value.strip("\"'«»“”„").strip()
         value = value.rstrip(".").strip()
-        if not value:
-            raise ValueError("пустой заголовок")
         return value[:120]
 
     @field_validator("category", mode="before")

@@ -432,6 +432,13 @@ async def _complete_task(message: Message, services: Services, query: str) -> bo
     return True
 
 
+def _fallback_title(text: str) -> str:
+    """Заголовок из первых слов, если LLM вернула пустой."""
+    cleaned = " ".join(text.split()).strip(" .,:;!?—-\"'«»“”„")
+    title = " ".join(cleaned.split()[:7])[:80].strip()
+    return title or "Заметка"
+
+
 async def _process(
     bot: Bot,
     message: Message,
@@ -477,6 +484,9 @@ async def _process(
     if not draft.is_meaningful:
         await message.answer("🤔 В сообщении нет содержания для заметки.")
         return
+
+    if not draft.title:
+        draft = draft.model_copy(update={"title": _fallback_title(text)})
 
     created = now
 
