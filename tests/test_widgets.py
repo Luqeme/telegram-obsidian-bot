@@ -293,7 +293,22 @@ def test_report_month_state() -> None:
     assert state["e"] == 27000
     assert state["b"] == 63000
     assert state["a"] == "current"
-    assert state["r"][0] == ["Аренда", 25000, 93]
+    assert state["r"][0] == ["Аренда", 25000, 93, 0]
+
+
+def test_report_month_state_uses_limits() -> None:
+    from datetime import datetime, timezone
+
+    from handlers.report import report_state
+
+    now = datetime(2026, 10, 15, tzinfo=timezone.utc)
+    state = report_state(
+        ROWS, "current", now, {"аренда": 20000.0, "еда": 1000.0}
+    )
+    rows = {row[0]: row for row in state["r"]}
+
+    assert rows["Аренда"] == ["Аренда", 25000, 125, 20000]
+    assert rows["Еда"] == ["Еда", 2000, 200, 1000]
 
 
 def test_report_state_navigation() -> None:

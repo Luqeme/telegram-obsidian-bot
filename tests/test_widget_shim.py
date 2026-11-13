@@ -215,7 +215,7 @@ def test_handler_switches_report_period() -> None:
     async def fake_read(_services) -> list[dict]:
         return [{"date": "2026-10-01"}]
 
-    def fake_state(rows, view, now) -> dict:
+    def fake_state(rows, view, now, budgets=None) -> dict:
         calls["view"] = view
         calls["rows"] = rows
         calls["now"] = now
@@ -233,18 +233,23 @@ def test_handler_switches_report_period() -> None:
         edits.append((token, chat_id, message_id, chat_data))
         return True
 
+    async def fake_budgets(_services) -> dict:
+        return {}
+
     originals = (
         widget_handlers.read_money,
         widget_handlers.report_state,
         widget_handlers.dumps_report_state,
         widget_handlers.answer_widget_query,
         widget_handlers.edit_widget_data,
+        widget_handlers.money_budgets,
     )
     widget_handlers.read_money = fake_read
     widget_handlers.report_state = fake_state
     widget_handlers.dumps_report_state = fake_dump
     widget_handlers.answer_widget_query = fake_answer
     widget_handlers.edit_widget_data = fake_edit
+    widget_handlers.money_budgets = fake_budgets
     try:
         settings = type(
             "Settings",
@@ -274,6 +279,7 @@ def test_handler_switches_report_period() -> None:
             widget_handlers.dumps_report_state,
             widget_handlers.answer_widget_query,
             widget_handlers.edit_widget_data,
+            widget_handlers.money_budgets,
         ) = originals
 
     assert calls["view"] == "mon:2026-10"
@@ -565,6 +571,10 @@ def _money_services(raw: str, today: str = "2026-11-13"):
     return services, calls, note_hash
 
 
+async def _no_budgets(_services) -> dict:
+    return {}
+
+
 def test_handler_changes_spend_category() -> None:
     from handlers import widgets as widget_handlers
 
@@ -587,9 +597,11 @@ def test_handler_changes_spend_category() -> None:
     originals = (
         widget_handlers.answer_widget_query,
         widget_handlers.edit_widget_data,
+        widget_handlers.money_budgets,
     )
     widget_handlers.answer_widget_query = fake_answer
     widget_handlers.edit_widget_data = fake_edit
+    widget_handlers.money_budgets = _no_budgets
     try:
         asyncio.run(
             widget_handlers.on_widget_query(
@@ -597,7 +609,11 @@ def test_handler_changes_spend_category() -> None:
             )
         )
     finally:
-        widget_handlers.answer_widget_query, widget_handlers.edit_widget_data = originals
+        (
+            widget_handlers.answer_widget_query,
+            widget_handlers.edit_widget_data,
+            widget_handlers.money_budgets,
+        ) = originals
 
     assert calls["answer"] == "ok"
     old_line, new_line = calls["replace"]
@@ -629,9 +645,11 @@ def test_handler_cancels_spend() -> None:
     originals = (
         widget_handlers.answer_widget_query,
         widget_handlers.edit_widget_data,
+        widget_handlers.money_budgets,
     )
     widget_handlers.answer_widget_query = fake_answer
     widget_handlers.edit_widget_data = fake_edit
+    widget_handlers.money_budgets = _no_budgets
     try:
         asyncio.run(
             widget_handlers.on_widget_query(
@@ -639,7 +657,11 @@ def test_handler_cancels_spend() -> None:
             )
         )
     finally:
-        widget_handlers.answer_widget_query, widget_handlers.edit_widget_data = originals
+        (
+            widget_handlers.answer_widget_query,
+            widget_handlers.edit_widget_data,
+            widget_handlers.money_budgets,
+        ) = originals
 
     assert calls["answer"] == "ok"
     assert calls["removed"] == ["2026-11-13,expense,540,Еда,обед"]

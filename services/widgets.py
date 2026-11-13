@@ -280,6 +280,7 @@ let last = null;
 function esc(v) { const d = document.createElement('div'); d.textContent = String(v ?? ''); return d.innerHTML; }
 function attr(v) { return esc(v).replace(/"/g, '&quot;'); }
 function money(v) { return Math.round(Number(v) || 0).toLocaleString('ru-RU') + ' ₽'; }
+function num(v) { return Math.round(Number(v) || 0).toLocaleString('ru-RU'); }
 function render() {
   const raw = TelegramWidget.chatData;
   if (!raw) {
@@ -303,6 +304,17 @@ function render() {
     h += '<div class="off">Отменено</div>';
     root.innerHTML = h;
     return;
+  }
+
+  if (s.lim) {
+    const spent = Number(s.sp) || 0;
+    const pct = Math.round(spent / s.lim * 100);
+    const left = s.lim - spent;
+    h += '<div class="bud">';
+    h += '<div class="bl">' + esc(s.c) + ': ' + num(spent) + ' из ' + num(s.lim) + '</div>';
+    h += '<span class="t"><i class="' + (pct > 100 ? 'over' : pct >= 80 ? 'warn' : '') + '" style="width:' + Math.max(0, Math.min(100, pct)) + '%"></i></span>';
+    h += '<div class="bl">' + (left >= 0 ? 'осталось ' + num(left) + ' ₽' : 'перерасход ' + num(-left) + ' ₽') + (pct >= 80 ? ' · ' + pct + '%' : '') + '</div>';
+    h += '</div>';
   }
 
   const chips = s.k || [];
@@ -338,6 +350,12 @@ setInterval(render, 1500);
 .row{display:flex;gap:6px}
 .b.del{background:transparent;color:var(--tg-theme-destructive-text-color);border:1px solid var(--tg-theme-secondary-bg-color);font-size:11px}
 .off{font-size:13px;color:var(--tg-theme-hint-color);margin-top:6px}
+.bud{margin-bottom:10px}
+.bl{font-size:11px;color:var(--tg-theme-hint-color);margin:2px 0}
+.t{display:block;height:6px;border-radius:3px;background:var(--tg-theme-secondary-bg-color);overflow:hidden}
+.t i{display:block;height:100%;border-radius:3px;background:var(--tg-theme-button-color)}
+.t i.over{background:#e5534b}
+.t i.warn{background:#f0a020}
 </style>
 """
     if compressed_size(markup) > MAX_COMPRESSED:
@@ -359,6 +377,7 @@ const root = document.getElementById('w');
 let last = null;
 function esc(v) { const d = document.createElement('div'); d.textContent = String(v ?? ''); return d.innerHTML; }
 function money(v) { return Math.round(Number(v) || 0).toLocaleString('ru-RU') + ' ₽'; }
+function num(v) { return Math.round(Number(v) || 0).toLocaleString('ru-RU'); }
 function btn(label, data, cls) {
   return '<button class="b ' + (cls || '') + '" data-d="' + esc(data) + '">' + esc(label) + '</button>';
 }
@@ -385,12 +404,31 @@ function render() {
     h += '<div><span>Остаток</span><b>' + money(s.b) + '</b></div>';
     h += '</div>';
     const rows = s.r || [];
+    let ok = 0, warn = 0, over = 0;
+    for (const r of rows) {
+      const lim = Number(r[3]) || 0;
+      if (!lim) continue;
+      const p = Number(r[2]) || 0;
+      if (p > 100) over += 1;
+      else if (p >= 80) warn += 1;
+      else ok += 1;
+    }
+    if (ok + warn + over) {
+      h += '<div class="bud">Бюджеты: ' + ok + ' в норме';
+      if (warn) h += ' · ' + warn + ' на пределе';
+      if (over) h += ' · ' + over + ' перерасход';
+      h += '</div>';
+    }
     if (rows.length) {
       h += '<div class="bars">';
       for (const r of rows) {
+        const lim = Number(r[3]) || 0;
+        const pct = Number(r[2]) || 0;
+        const width = Math.max(0, Math.min(100, pct));
+        const tone = lim ? (pct > 100 ? ' over' : pct >= 80 ? ' warn' : ' budget') : '';
         h += '<div class="row"><span class="n">' + esc(r[0]) + '</span>';
-        h += '<span class="t"><i style="width:' + (Number(r[2]) || 0) + '%"></i></span>';
-        h += '<span class="v">' + money(r[1]) + '</span></div>';
+        h += '<span class="t"><i class="' + tone + '" style="width:' + width + '%"></i></span>';
+        h += '<span class="v">' + num(r[1]) + (lim ? ' / ' + num(lim) : ' ₽') + '</span></div>';
       }
       h += '</div>';
     } else {
@@ -444,7 +482,10 @@ setInterval(render, 1500);
 .n{width:88px;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .t{flex:1;height:8px;border-radius:4px;background:var(--tg-theme-secondary-bg-color);overflow:hidden}
 .t i{display:block;height:100%;border-radius:4px;background:var(--tg-theme-button-color)}
-.v{width:78px;text-align:right;font-size:11px;color:var(--tg-theme-hint-color)}
+.v{width:96px;text-align:right;font-size:10px;color:var(--tg-theme-hint-color)}
+.bud{font-size:11px;color:var(--tg-theme-hint-color);margin-bottom:8px}
+.t i.over{background:#e5534b}
+.t i.warn{background:#f0a020}
 .empty{color:var(--tg-theme-hint-color);font-size:13px;margin-bottom:10px}
 .nav{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .months{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}

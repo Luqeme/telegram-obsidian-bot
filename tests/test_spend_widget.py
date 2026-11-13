@@ -120,6 +120,36 @@ def test_spend_state_income_flag() -> None:
     assert state["g"] == 1
 
 
+def test_spend_state_includes_budget() -> None:
+    state = spend_state(
+        amount=540,
+        kind="expense",
+        category="Еда",
+        note=NOTE,
+        categories=["Еда"],
+        today_total=0,
+        limit=8000,
+        spent=2738,
+    )
+
+    assert state["lim"] == 8000
+    assert state["sp"] == 2738
+
+
+def test_spend_state_without_budget_has_zeroes() -> None:
+    state = spend_state(
+        amount=540,
+        kind="expense",
+        category="Еда",
+        note=NOTE,
+        categories=["Еда"],
+        today_total=0,
+    )
+
+    assert state["lim"] == 0
+    assert state["sp"] == 0
+
+
 def test_spend_state_drops_chips_that_do_not_fit_request() -> None:
     long_name = "Очень длинная категория денег"
     state = spend_state(

@@ -24,6 +24,7 @@ TASK_RE = re.compile(r"^[ \t]*- \[ \] (.+)$", re.MULTILINE)
 HEADING_RE = re.compile(r"^# (.+)$", re.MULTILINE)
 DUE_RE = re.compile(r"📅\s*(\d{4}-\d{2}-\d{2})")
 DONE_RE = re.compile(r"✅\s*\d{4}-\d{2}-\d{2}")
+MONEY_LIMIT_RE = re.compile(r"^(.*?)\s*(?:—|–|:)\s*(\d[\d\s\u00a0]*(?:[.,]\d+)?)\s*₽?\s*$")
 PRIORITY_MARKS = ("⏫", "🔼", "🔽")
 
 DEFAULT_TTL = 600
@@ -182,6 +183,57 @@ def parse_note(path: str, raw: str) -> NoteInfo:
     )
 
 
+def split_money_line(line: str) -> tuple[str, float | None]:
+    """'Еда — 8 000' -> ('Еда', 8000). Без суммы -> (строка, None)."""
+    match = MONEY_LIMIT_RE.match(line.strip())
+    if match is None:
+        return line.strip(), None
+    name = match.group(1).strip()
+    raw = match.group(2).replace("\u00a0", "").replace(" ", "").replace(",", ".")
+    try:
+        amount = float(raw)
+    except ValueError:
+        return line.strip(), None
+    if not name or amount <= 0:
+        return line.strip(), None
+    return name, amount
+
+
+def set_money_limit(
+    raw: str, category: str, amount: float | None
+) -> tuple[str, str] | None:
+    """Строка категории с новым лимитом: (старая строка, новая)."""
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith(("- ", "* ")):
+            continue
+        name, _ = split_money_line(stripped[2:].strip())
+        if name.casefold() != category.casefold():
+            continue
+        if amount:
+            formatted = f"{amount:,.0f}".replace(",", " ")
+            return line, f"- {name} — {formatted}"
+        return line, f"- {name}"
+    return None
+
+
+def parse_money_budgets(text: str) -> dict[str, float]:
+    """Лимиты по категориям из файла: 'Еда — 8 000' -> {'Еда': 8000}."""
+    budgets: dict[str, float] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith(("#", ">", "```", "|")):
+            continue
+        if line.startswith(("- ", "* ")):
+            line = line[2:].strip()
+        if not line or len(line) > 60:
+            continue
+        name, amount = split_money_line(line)
+        if amount is not None:
+            budgets[name.casefold()] = amount
+    return budgets
+
+
 def parse_money_categories(text: str) -> list[str]:
     """Список категорий из файла: по одной на строку, можно с дефисом."""
     result: list[str] = []
@@ -192,12 +244,15 @@ def parse_money_categories(text: str) -> list[str]:
             continue
         if line.startswith(("- ", "* ")):
             line = line[2:].strip()
-        if not line or len(line) > 40:
+        if not line:
             continue
-        key = line.casefold()
+        name, _ = split_money_line(line)
+        if not name or len(name) > 40:
+            continue
+        key = name.casefold()
         if key not in seen:
             seen.add(key)
-            result.append(line)
+            result.append(name)
     return result[:40]
 
 
@@ -208,6 +263,8 @@ class NotesIndex:
         self._notes: list[NoteInfo] = []
         self._projects: list[NoteInfo] = []
         self._money_categories: list[str] = []
+        self._money_budgets: dict[str, float] = {}
+        self._money_categories_path = ""
         self._snapshot_sha: str | None = None
         self._truncated: tuple[int, int] | None = None
         self._loaded_at = 0.0
@@ -240,6 +297,8 @@ class NotesIndex:
             known: dict[str, NoteInfo] = {}
             projects: dict[str, NoteInfo] = {}
             money_categories: list[str] = []
+            money_budgets: dict[str, float] = {}
+            money_path = ""
             for path, raw in documents.items():
                 note = parse_note(path, raw) if raw else None
                 if note is None:
@@ -248,12 +307,16 @@ class NotesIndex:
                     projects[path] = note
                 elif note.note_type == "money-categories":
                     money_categories = parse_money_categories(note.text)
+                    money_budgets = parse_money_budgets(note.text)
+                    money_path = path
                 elif note.note_type not in SKIP_TYPES:
                     known[path] = note
 
             self._notes = [known[path] for path in documents if path in known]
             self._projects = [projects[path] for path in documents if path in projects]
             self._money_categories = money_categories
+            self._money_budgets = money_budgets
+            self._money_categories_path = money_path
             self._snapshot_sha = commit
             self._loaded_at = loop.time()
             logger.info("Индекс заметок: %s файлов", len(documents))
@@ -395,6 +458,16 @@ class NotesIndex:
         """Категории денег из файла в хранилище (пусто, если файла нет)."""
         await self.notes()
         return self._money_categories
+
+    async def money_budgets(self) -> dict[str, float]:
+        """Месячные лимиты по категориям (ключи в нижнем регистре)."""
+        await self.notes()
+        return dict(self._money_budgets)
+
+    async def money_categories_path(self) -> str:
+        """Путь к файлу категорий, чтобы бот мог его переписать."""
+        await self.notes()
+        return self._money_categories_path
 
     async def top_tags(self, limit: int = 30) -> list[str]:
         """Самые частые теги базы — чтобы модель не плодила синонимы."""

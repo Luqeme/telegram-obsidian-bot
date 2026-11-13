@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from services import GitHubError, Services
 from services.money import (
     MONEY_PATH,
+    category_spent,
     day_expense,
     dumps_spend_state,
     find_row_line,
@@ -21,7 +22,7 @@ from services.widget_shim import WidgetQuery, answer_widget_query, edit_widget_d
 
 from .digest import build_today_state, collect_today, dumps_state
 from .notes import money_categories
-from .report import dumps_report_state, read_money, report_state
+from .report import dumps_report_state, money_budgets, read_money, report_state
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +221,10 @@ async def _report(
     try:
         rows = await read_money(services)
         state = report_state(
-            rows, view, datetime.now(services.settings.tz)
+            rows,
+            view,
+            datetime.now(services.settings.tz),
+            await money_budgets(services),
         )
     except GitHubError as exc:
         logger.error("widget report: %s", exc)
@@ -330,11 +334,14 @@ async def _refresh_spend(
         return
 
     today = datetime.now(services.settings.tz).date().isoformat()
+    month = today[:7]
     try:
         rows = parse_rows(await services.github.get_text(MONEY_PATH))
     except GitHubError:
         rows = []
 
+    budgets = await money_budgets(services)
+    limit = budgets.get(values[3].casefold(), 0.0)
     state = spend_state(
         amount=to_amount(values[2]),
         kind=values[1],
@@ -343,6 +350,8 @@ async def _refresh_spend(
         categories=await money_categories(services),
         today_total=day_expense(rows, today),
         status=status,
+        limit=limit,
+        spent=category_spent(rows, month, values[3]) if limit else 0.0,
     )
     await edit_widget_data(
         token,

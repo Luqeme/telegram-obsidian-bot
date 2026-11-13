@@ -39,11 +39,17 @@ from services import (
 from services.undo import Action, UndoStore
 from services.notes_index import STOPWORDS, WORD_RE, TaskRef
 from services.money import (
+    budget_status,
+    category_spent,
     day_expense,
     dumps_spend_state,
+    format_rub,
+    match_category,
+    parse_limit_phrase,
     parse_rows,
     spend_state,
 )
+from services.notes_index import set_money_limit
 from services.widgets import build_spend_widget, send_widget
 
 logger = logging.getLogger(__name__)
@@ -273,6 +279,9 @@ async def on_fix_reply(message: Message, bot: Bot, services: Services) -> None:
 async def handle_text(message: Message, bot: Bot, services: Services) -> None:
     text = (message.text or "").strip()
 
+    if await _handle_limit_phrase(message, services, text):
+        return
+
     if len(text) < MIN_TEXT_LEN or not any(char.isalpha() for char in text):
         await message.answer(
             "🤔 Слишком коротко, чтобы сделать заметку. Напиши пару предложений."
@@ -368,6 +377,9 @@ async def handle_voice(message: Message, bot: Bot, services: Services) -> None:
         await message.answer(
             "🤔 Не удалось разобрать речь. Попробуй ещё раз или отправь текстом."
         )
+        return
+
+    if await _handle_limit_phrase(message, services, text):
         return
 
     logger.info("voice_transcribed user_id=%s chars=%s", message.from_user.id, len(text))
@@ -1138,12 +1150,16 @@ async def _spend_state(
     category: str,
     note: str,
 ) -> dict:
-    today = datetime.now(services.settings.tz).date().isoformat()
+    now = datetime.now(services.settings.tz)
+    today = now.date().isoformat()
+    month = now.strftime("%Y-%m")
     try:
         rows = parse_rows(await services.github.get_text(MONEY_PATH))
     except GitHubError as exc:
         logger.warning("spend widget: %s", exc)
         rows = []
+    budgets = await _money_budgets(services)
+    limit = budgets.get(category.casefold(), 0.0)
     return spend_state(
         amount=amount,
         kind=kind,
@@ -1151,7 +1167,158 @@ async def _spend_state(
         note=note,
         categories=await money_categories(services),
         today_total=day_expense(rows, today),
+        limit=limit,
+        spent=category_spent(rows, month, category) if limit else 0.0,
     )
+
+
+async def _money_budgets(services: Services) -> dict[str, float]:
+    try:
+        return await services.index.money_budgets()
+    except GitHubError as exc:
+        logger.warning("Не удалось получить лимиты: %s", exc)
+        return {}
+
+
+async def _money_rows(services: Services) -> list[dict]:
+    try:
+        return parse_rows(await services.github.get_text(MONEY_PATH))
+    except GitHubError as exc:
+        logger.warning("Не удалось прочитать траты: %s", exc)
+        return []
+
+
+async def _handle_limit_phrase(
+    message: Message, services: Services, text: str
+) -> bool:
+    """«лимит еда 8000» — ставит, снимает или показывает лимиты."""
+    command = parse_limit_phrase(text)
+    if command is None:
+        return False
+
+    categories = await money_categories(services)
+
+    if command.kind == "list":
+        await message.answer(await _render_limits(services, categories))
+        return True
+
+    if command.kind == "missing":
+        await message.answer(
+            "Сколько поставить? Например: <code>лимит еда 8000</code>",
+            parse_mode="HTML",
+        )
+        return True
+
+    category = match_category(command.category, categories)
+    if category is None:
+        names = ", ".join(categories[:12]) or "—"
+        given = html.escape(command.category) or "—"
+        await message.answer(
+            f"Не понял категорию «{given}».\n\nЕсть: {html.escape(names)}"
+        )
+        return True
+
+    amount = command.amount if command.kind == "set" else None
+    await _write_limit(message, services, category, amount)
+    return True
+
+
+async def _write_limit(
+    message: Message, services: Services, category: str, amount: float | None
+) -> None:
+    try:
+        path = await services.index.money_categories_path()
+    except GitHubError as exc:
+        logger.error("budget path: %s", exc)
+        await message.answer(exc.user_message)
+        return
+
+    if not path:
+        await message.answer("Не нашёл файл с категориями денег.")
+        return
+
+    try:
+        raw = await services.github.get_text(path)
+    except GitHubError as exc:
+        logger.error("budget read: %s", exc)
+        await message.answer(exc.user_message)
+        return
+
+    change = set_money_limit(raw, category, amount)
+    if change is None:
+        await message.answer("Не нашёл эту категорию в файле — добавь её туда.")
+        return
+
+    old_line, new_line = change
+    if old_line == new_line:
+        await message.answer(f"У «{html.escape(category)}» уже такой лимит.")
+        return
+
+    try:
+        updated = await services.github.replace_line(
+            path, old_line, new_line, f"Budget: {category} {amount or 'off'}"
+        )
+    except GitHubError as exc:
+        logger.error("budget write: %s", exc)
+        await message.answer(exc.user_message)
+        return
+
+    if not updated:
+        await message.answer("Не получилось переписать файл — попробуй ещё раз.")
+        return
+
+    services.index.invalidate()
+    logger.info("budget_set category=%s amount=%s", category, amount)
+
+    if not amount:
+        await message.answer(f"✅ С «{html.escape(category)}» лимит снят.")
+        return
+
+    now = datetime.now(services.settings.tz)
+    rows = await _money_rows(services)
+    spent = category_spent(rows, now.strftime("%Y-%m"), category)
+    status = budget_status(spent, amount)
+    if status["over"]:
+        tail = f"перерасход {format_rub(-status['left'])} ₽"
+    else:
+        tail = f"осталось {format_rub(status['left'])} ₽"
+    await message.answer(
+        f"✅ <b>{html.escape(category)}</b> — лимит {format_rub(amount)} ₽\n"
+        f"Потрачено в этом месяце: {format_rub(spent)} ₽ · {tail} ({status['pct']}%)",
+        parse_mode="HTML",
+    )
+
+
+async def _render_limits(services: Services, categories: list[str]) -> str:
+    budgets = await _money_budgets(services)
+    rows = await _money_rows(services)
+    month = datetime.now(services.settings.tz).strftime("%Y-%m")
+
+    with_limit = [name for name in categories if budgets.get(name.casefold())]
+    if not with_limit:
+        return (
+            "Лимитов пока нет.\n\n"
+            "Напиши: <code>лимит еда 8000</code>"
+        )
+
+    lines = ["📊 <b>Лимиты на этот месяц</b>", ""]
+    for name in with_limit:
+        limit = budgets[name.casefold()]
+        spent = category_spent(rows, month, name)
+        status = budget_status(spent, limit)
+        if status["over"]:
+            tail = f"перерасход {format_rub(-status['left'])} ₽"
+        else:
+            tail = f"осталось {format_rub(status['left'])} ₽"
+        lines.append(
+            f"• {html.escape(name)} — {format_rub(spent)} / "
+            f"{format_rub(limit)} ₽ · {tail} ({status['pct']}%)"
+        )
+
+    rest = [name for name in categories if not budgets.get(name.casefold())]
+    if rest:
+        lines.extend(["", "Без лимита: " + ", ".join(html.escape(n) for n in rest)])
+    return "\n".join(lines)
 
 
 def _render_card(path: str, draft: NoteDraft, project: str = "") -> str:

@@ -211,42 +211,52 @@ async def send_report(
 
 
 def report_state(
-    rows: list[dict], view: str, now: datetime
+    rows: list[dict], view: str, now: datetime, budgets: dict[str, float] | None = None
 ) -> dict:
     """Состояние виджета отчёта для вида ``current``/``prev``/``mon:``/``year:``..."""
+    budgets = budgets or {}
     now_month = now.strftime("%Y-%m")
     parts = view.split(":")
     kind = parts[0]
     argument = parts[1] if len(parts) > 1 else ""
 
     if kind == "current":
-        return _month_state(rows, now_month, now_month)
+        return _month_state(rows, now_month, now_month, budgets)
     if kind == "prev":
-        return _month_state(rows, previous_month(now_month), now_month)
+        return _month_state(rows, previous_month(now_month), now_month, budgets)
     if kind == "months":
         return _months_state(rows, _year(argument, now.year))
     if kind == "year":
         return _year_state(rows, _year(argument, now.year), now.year)
     if kind == "mon":
         month = _parse_month(argument) or now_month
-        return _month_state(rows, month, now_month)
+        return _month_state(rows, month, now_month, budgets)
     if kind in ("mp", "mn"):
         month = _parse_month(argument) or now_month
         shift = -1 if kind == "mp" else 1
-        return _month_state(rows, _shift_month(month, shift), now_month)
+        return _month_state(rows, _shift_month(month, shift), now_month, budgets)
     if kind in ("yp", "yn"):
         year = _year(argument, now.year)
         return _year_state(rows, year + (-1 if kind == "yp" else 1), now.year)
-    return _month_state(rows, now_month, now_month)
+    return _month_state(rows, now_month, now_month, budgets)
 
 
-def _month_state(rows: list[dict], month: str, now_month: str) -> dict:
+def _month_state(
+    rows: list[dict],
+    month: str,
+    now_month: str,
+    budgets: dict[str, float] | None = None,
+) -> dict:
+    budgets = budgets or {}
     summary = summarize(rows, month)
     total = summary.expense or 1.0
-    items = [
-        [category, round(amount), round(amount / total * 100)]
-        for category, amount in summary.expense_categories[:REPORT_ROWS]
-    ]
+    items = []
+    for category, amount in summary.expense_categories[:REPORT_ROWS]:
+        limit = budgets.get(category.casefold(), 0.0)
+        share = amount / (limit or total) * 100
+        items.append(
+            [category, round(amount), round(min(share, 999)), round(limit)]
+        )
     if month == now_month:
         active = "current"
     elif month == previous_month(now_month):
@@ -333,6 +343,15 @@ async def read_money(services: Services) -> list[dict]:
     return parse_rows(raw)
 
 
+async def money_budgets(services: Services) -> dict[str, float]:
+    """Лимиты категорий из индекса (пусто, если файла нет)."""
+    try:
+        return await services.index.money_budgets()
+    except GitHubError as exc:
+        logger.warning("Не удалось получить лимиты: %s", exc)
+        return {}
+
+
 async def _send_report_state(
     bot: Bot,
     chat_id: int,
@@ -340,7 +359,12 @@ async def _send_report_state(
     rows: list[dict],
     view: str,
 ) -> None:
-    state = report_state(rows, view, datetime.now(services.settings.tz))
+    state = report_state(
+        rows,
+        view,
+        datetime.now(services.settings.tz),
+        await money_budgets(services),
+    )
     markup = build_report_shell()
     if markup:
         ok, reason = await send_widget(
