@@ -1,4 +1,4 @@
-"""HTML-виджет для /report: один пузырь с графиком, без Mini App."""
+"""HTML-виджеты: оболочки, общий JS и отправка через Bot API."""
 
 from __future__ import annotations
 
@@ -8,84 +8,61 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from .money import MonthSummary, format_rub, month_label, summarize
+from .money import format_rub
 
 WIDGET_URL = "https://api.telegram.org/bot{token}/sendWidget"
 WIDGET_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 MAX_COMPRESSED = 4096
-MAX_CATEGORIES = 6
-MAX_TASKS = 6
 
-MONTH_SHORT = (
-    "янв",
-    "фев",
-    "мар",
-    "апр",
-    "май",
-    "июн",
-    "июл",
-    "авг",
-    "сен",
-    "окт",
-    "ноя",
-    "дек",
-)
+# Общие функции для всех виджетов. Держим в одном месте, чтобы не расходились.
+WIDGET_JS = r"""
+function esc(v) {
+  const d = document.createElement('div');
+  d.textContent = String(v ?? '');
+  return d.innerHTML;
+}
+function attr(v) { return esc(v).replace(/"/g, '&quot;'); }
+function num(v) { return Math.round(Number(v) || 0).toLocaleString('ru-RU'); }
+function money(v) { return num(v) + ' ₽'; }
+function chip(label, data, cls) {
+  return '<button class="b ' + (cls || '') + '" data-d="' + attr(data) + '">' + esc(label) + '</button>';
+}
+function bind(root) {
+  root.addEventListener('click', (e) => {
+    const el = e.target;
+    const request = el && el.dataset ? el.dataset.d : null;
+    if (!request) return;
+    el.disabled = true;
+    TelegramWidget.request(request).catch(() => { el.disabled = false; });
+  });
+}
+function start(render) {
+  try { TelegramWidget.onEvent('chatDataChanged', () => render(false)); } catch (e) {}
+  render(false);
+  setInterval(() => { if (!document.hidden) render(false); }, 3000);
+}
+""".strip()
 
 
 def compressed_size(markup: str) -> int:
     return len(zlib.compress(markup.encode("utf-8"), 9))
 
 
-def build_report_widget(summary: MonthSummary, month: str) -> str:
-    """HTML виджета. Пустая строка, если не влез в лимит Telegram."""
-    total = summary.expense or 1.0
-    bars: list[str] = []
-    for category, amount in summary.expense_categories[:MAX_CATEGORIES]:
-        share = amount / total * 100
-        bars.append(
-            '<div class="r"><span class="n">'
-            f"{html.escape(category)}</span><span class=\"t\"><i style=\"width:{share:.0f}%\">"
-            f'</i></span><span class="v">{format_rub(amount)}</span></div>'
-        )
-    if not bars:
-        bars.append('<div class="empty">Расходов нет.</div>')
-
-    markup = f"""
-<div class="w">
-  <div class="totals">
-    <div><span>Доход</span><b>{format_rub(summary.income)} ₽</b></div>
-    <div><span>Расход</span><b>{format_rub(summary.expense)} ₽</b></div>
-    <div><span>Остаток</span><b>{format_rub(summary.balance)} ₽</b></div>
-  </div>
-  <div class="bars">{''.join(bars)}</div>
-</div>
-<style>
-.w{{font:14px system-ui,sans-serif;color:var(--tg-theme-text-color);padding:4px 2px}}
-.totals{{display:flex;gap:10px;margin-bottom:12px}}
-.totals div{{flex:1}}
-.totals span{{display:block;color:var(--tg-theme-hint-color);font-size:12px}}
-.r{{display:flex;align-items:center;gap:8px;margin:6px 0}}
-.n{{width:88px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
-.t{{flex:1;height:8px;border-radius:4px;background:var(--tg-theme-secondary-bg-color);overflow:hidden}}
-.t i{{display:block;height:100%;border-radius:4px;background:var(--tg-theme-button-color)}}
-.v{{width:68px;text-align:right;font-size:12px;color:var(--tg-theme-hint-color)}}
-.empty{{color:var(--tg-theme-hint-color);font-size:13px}}
-</style>
-"""
+def _shell(script: str, style: str) -> str:
+    markup = (
+        '<div id="w" class="w"></div>\n'
+        f"<script>\n{WIDGET_JS}\n{script.strip()}\n</script>\n"
+        f"<style>\n{style.strip()}\n</style>\n"
+    )
     if compressed_size(markup) > MAX_COMPRESSED:
         return ""
     return markup
 
 
-def build_today_widget() -> str:
-    """Оболочка виджета «Сегодня»; данные приходят в TelegramWidget.chatData."""
-    markup = r"""
-<div id="w" class="w"></div>
-<script>
+TODAY_JS = r"""
 const root = document.getElementById('w');
 let last = null;
 let open = null;
-function esc(v) { const d = document.createElement('div'); d.textContent = String(v ?? ''); return d.innerHTML; }
 function render(force) {
   let s = {};
   const raw = TelegramWidget.chatData;
@@ -96,30 +73,33 @@ function render(force) {
   if (!force && raw === last) return;
   if (raw !== last) open = null;
   last = raw;
-  if (typeof raw === 'object') {
-    s = raw;
-  } else {
-    try { s = JSON.parse(raw); } catch (e) { return; }
-  }
+  if (typeof raw === 'object') s = raw;
+  else { try { s = JSON.parse(raw); } catch (e) { return; } }
+
   let h = '<div class="stats">';
   h += '<div><span>Задач</span><b>' + (s.o || 0) + '</b></div>';
   h += '<div><span>Просрочено</span><b>' + (s.ov || 0) + '</b></div>';
   h += '<div><span>На сегодня</span><b>' + (s.du || 0) + '</b></div>';
   h += '<div><span>Инбокс</span><b>' + (s.in || 0) + '</b></div></div>';
-  h += '<div class="date">Заметок сегодня: ' + (s.n || 0) + (s.m ? ' \u00b7 ' + esc(s.m) : '') + '</div><div class="tasks">';
+  h += '<div class="date">Заметок сегодня: ' + (s.n || 0) + (s.m ? ' · ' + esc(s.m) : '') + '</div>';
+  h += '<div class="tasks">';
+
   const tasks = s.t || [];
   if (tasks.length) {
     for (const t of tasks) {
-      h += '<div class="task"><span class="i">' + esc(t.k || '\u2022') + '</span><span class="x">' + esc(t.x) + '</span>';
+      h += '<div class="task"><span class="i">' + esc(t.k || '•') + '</span>';
+      h += '<span class="x">' + esc(t.x) + '</span>';
       if (t.d) h += '<span class="d">' + esc(t.d) + '</span>';
-      if (t.i) h += '<button class="b" data-act="done" data-id="' + esc(t.i) + '">\u2713</button>';
-      if (t.i) h += '<button class="b more" data-act="open" data-id="' + esc(t.i) + '">\u22ef</button>';
+      if (t.i) {
+        h += chip('✓', 'done:' + t.i);
+        h += '<button class="b more" data-open="' + attr(t.i) + '">⋯</button>';
+      }
       h += '</div>';
       if (t.i && open === t.i) {
         h += '<div class="acts">';
-        h += '<button class="b" data-act="due" data-id="' + esc(t.i) + '" data-mode="tomorrow">Завтра</button>';
-        h += '<button class="b" data-act="due" data-id="' + esc(t.i) + '" data-mode="plus3">+3 дня</button>';
-        h += '<button class="b" data-act="due" data-id="' + esc(t.i) + '" data-mode="clear">Без даты</button>';
+        h += chip('Завтра', 'due:' + t.i + ':tomorrow');
+        h += chip('+3 дня', 'due:' + t.i + ':plus3');
+        h += chip('Без даты', 'due:' + t.i + ':clear');
         h += '</div>';
       }
     }
@@ -127,40 +107,28 @@ function render(force) {
     h += '<div class="empty">Открытых задач нет.</div>';
   }
   h += '</div>';
+
   const off = s.off || 0;
   const total = s.tot || tasks.length;
   if (off > 0 || off + tasks.length < total) {
     h += '<div class="pager">';
-    if (off > 0) h += '<button class="b" data-act="prev" data-off="' + Math.max(0, off - 5) + '">\u2190 Назад</button>';
-    if (off + tasks.length < total) h += '<button class="b" data-act="more" data-off="' + (off + tasks.length) + '">Ещё \u2192</button>';
+    if (off > 0) h += chip('← Назад', 'prev:' + Math.max(0, off - 5));
+    if (off + tasks.length < total) h += chip('Ещё →', 'more:' + (off + tasks.length));
     h += '</div>';
   }
   root.innerHTML = h;
 }
 root.addEventListener('click', (e) => {
   const el = e.target;
-  if (!el || !el.dataset) return;
-  const act = el.dataset.act;
-  if (!act) return;
-  if (act === 'open') {
-    open = open === el.dataset.id ? null : el.dataset.id;
-    render(true);
-    return;
-  }
-  let data = null;
-  if (act === 'done') data = 'done:' + el.dataset.id;
-  else if (act === 'due') data = 'due:' + el.dataset.id + ':' + el.dataset.mode;
-  else if (act === 'more') data = 'more:' + el.dataset.off;
-  else if (act === 'prev') data = 'prev:' + el.dataset.off;
-  if (!data) return;
-  el.disabled = true;
-  TelegramWidget.request(data).catch(() => { el.disabled = false; });
+  if (!el || !el.dataset || !el.dataset.open) return;
+  open = open === el.dataset.open ? null : el.dataset.open;
+  render(true);
 });
-try { TelegramWidget.onEvent('chatDataChanged', () => render(false)); } catch (e) {}
-render(false);
-setInterval(() => render(false), 1500);
-</script>
-<style>
+bind(root);
+start(render);
+"""
+
+TODAY_CSS = """
 .w{font:14px system-ui,sans-serif;color:var(--tg-theme-text-color);padding:4px 2px}
 .stats{display:flex;gap:10px;margin-bottom:8px}
 .stats div{flex:1}
@@ -173,15 +141,15 @@ setInterval(() => render(false), 1500);
 .b{border:0;border-radius:6px;padding:3px 8px;background:var(--tg-theme-button-color);color:var(--tg-theme-button-text-color);font-size:12px}
 .b.more{background:var(--tg-theme-secondary-bg-color);color:var(--tg-theme-hint-color);padding:3px 7px}
 .acts{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px 22px}
-.acts .b{background:var(--tg-theme-secondary-bg-color);color:var(--tg-theme-text-color);font-size:11px}
+.acts .b,.pager .b{background:var(--tg-theme-secondary-bg-color);color:var(--tg-theme-text-color);font-size:11px}
 .pager{display:flex;gap:6px;margin-top:10px}
-.pager .b{background:var(--tg-theme-secondary-bg-color);color:var(--tg-theme-text-color);font-size:11px}
 .empty{font-size:13px;color:var(--tg-theme-hint-color)}
-</style>
 """
-    if compressed_size(markup) > MAX_COMPRESSED:
-        return ""
-    return markup
+
+
+def build_today_widget() -> str:
+    """Оболочка виджета «Сегодня»; данные приходят в TelegramWidget.chatData."""
+    return _shell(TODAY_JS, TODAY_CSS)
 
 
 @dataclass(slots=True)
@@ -270,17 +238,9 @@ def weekly_caption(review: WeeklyReview) -> str:
     return f"🗓 Итоги недели · {review.period}"
 
 
-def build_spend_widget() -> str:
-    """Оболочка виджета траты: категории и отмена прямо в сообщении."""
-    markup = r"""
-<div id="w" class="w"></div>
-<script>
+SPEND_JS = r"""
 const root = document.getElementById('w');
 let last = null;
-function esc(v) { const d = document.createElement('div'); d.textContent = String(v ?? ''); return d.innerHTML; }
-function attr(v) { return esc(v).replace(/"/g, '&quot;'); }
-function money(v) { return Math.round(Number(v) || 0).toLocaleString('ru-RU') + ' ₽'; }
-function num(v) { return Math.round(Number(v) || 0).toLocaleString('ru-RU'); }
 function render() {
   const raw = TelegramWidget.chatData;
   if (!raw) {
@@ -297,7 +257,7 @@ function render() {
   let h = '<div class="hdr">' + (income ? 'Доход' : 'Расход');
   if (s.t) h += ' · сегодня ' + money(s.t);
   h += '</div>';
-  h += '<div class="sum ' + (income ? 'in' : '') + '">' + (income ? '+' : '−') + money(s.a) + '</div>';
+  h += '<div class="sum' + (income ? ' in' : '') + '">' + (income ? '+' : '−') + money(s.a) + '</div>';
   if (s.n) h += '<div class="note">' + esc(s.n) + '</div>';
 
   if (s.s === 'off') {
@@ -310,35 +270,27 @@ function render() {
     const spent = Number(s.sp) || 0;
     const pct = Math.round(spent / s.lim * 100);
     const left = s.lim - spent;
+    const tone = pct > 100 ? ' over' : pct >= 80 ? ' warn' : '';
     h += '<div class="bud">';
     h += '<div class="bl">' + esc(s.c) + ': ' + num(spent) + ' из ' + num(s.lim) + '</div>';
-    h += '<span class="t"><i class="' + (pct > 100 ? 'over' : pct >= 80 ? 'warn' : '') + '" style="width:' + Math.max(0, Math.min(100, pct)) + '%"></i></span>';
+    h += '<span class="t"><i class="' + tone + '" style="width:' + Math.max(0, Math.min(100, pct)) + '%"></i></span>';
     h += '<div class="bl">' + (left >= 0 ? 'осталось ' + num(left) + ' ₽' : 'перерасход ' + num(-left) + ' ₽') + (pct >= 80 ? ' · ' + pct + '%' : '') + '</div>';
     h += '</div>';
   }
 
-  const chips = s.k || [];
-  if (chips.length) {
+  if (s.k && s.k.length) {
     h += '<div class="chips">';
-    for (const c of chips) {
-      h += '<button class="b' + (c === s.c ? ' on' : '') + '" data-d="cat:' + attr(s.a) + ':' + attr(s.h) + ':' + attr(c) + '">' + esc(c) + '</button>';
-    }
+    for (const c of s.k) h += chip(c, 'cat:' + s.a + ':' + s.h + ':' + c, c === s.c ? 'on' : '');
     h += '</div>';
   }
-  h += '<div class="row"><button class="b del" data-d="undo:' + attr(s.a) + ':' + attr(s.h) + '">Отменить</button></div>';
+  h += '<div class="row"><button class="b del" data-d="' + attr('undo:' + s.a + ':' + s.h) + '">Отменить</button></div>';
   root.innerHTML = h;
 }
-root.addEventListener('click', (e) => {
-  const d = e.target && e.target.dataset ? e.target.dataset.d : null;
-  if (!d) return;
-  e.target.disabled = true;
-  TelegramWidget.request(d).catch(() => { e.target.disabled = false; });
-});
-try { TelegramWidget.onEvent('chatDataChanged', render); } catch (e) {}
-render();
-setInterval(render, 1500);
-</script>
-<style>
+bind(root);
+start(render);
+"""
+
+SPEND_CSS = """
 .w{font:14px system-ui,sans-serif;color:var(--tg-theme-text-color);padding:4px 2px}
 .hdr{font-size:12px;color:var(--tg-theme-hint-color);margin-bottom:4px}
 .sum{font-size:22px;font-weight:600;margin-bottom:2px}
@@ -356,31 +308,18 @@ setInterval(render, 1500);
 .t i{display:block;height:100%;border-radius:3px;background:var(--tg-theme-button-color)}
 .t i.over{background:#e5534b}
 .t i.warn{background:#f0a020}
-</style>
 """
-    if compressed_size(markup) > MAX_COMPRESSED:
-        return ""
-    return markup
 
 
-def report_caption(month: str) -> str:
-    return f"📊 Отчёт за {month_label(month)}"
+def build_spend_widget() -> str:
+    """Оболочка виджета траты: категории, бюджет и отмена в сообщении."""
+    return _shell(SPEND_JS, SPEND_CSS)
 
 
-def build_report_shell() -> str:
-    """Оболочка отчёта: периоды и данные переключаются через chatData."""
-    markup = r"""
-<div id="w" class="w"></div>
-<script>
+REPORT_JS = r"""
 const MONTHS = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
 const root = document.getElementById('w');
 let last = null;
-function esc(v) { const d = document.createElement('div'); d.textContent = String(v ?? ''); return d.innerHTML; }
-function money(v) { return Math.round(Number(v) || 0).toLocaleString('ru-RU') + ' ₽'; }
-function num(v) { return Math.round(Number(v) || 0).toLocaleString('ru-RU'); }
-function btn(label, data, cls) {
-  return '<button class="b ' + (cls || '') + '" data-d="' + esc(data) + '">' + esc(label) + '</button>';
-}
 function render() {
   const raw = TelegramWidget.chatData;
   if (!raw) {
@@ -403,6 +342,7 @@ function render() {
     h += '<div><span>Расход</span><b>' + money(s.e) + '</b></div>';
     h += '<div><span>Остаток</span><b>' + money(s.b) + '</b></div>';
     h += '</div>';
+
     const rows = s.r || [];
     let ok = 0, warn = 0, over = 0;
     for (const r of rows) {
@@ -419,13 +359,14 @@ function render() {
       if (over) h += ' · ' + over + ' перерасход';
       h += '</div>';
     }
+
     if (rows.length) {
       h += '<div class="bars">';
       for (const r of rows) {
         const lim = Number(r[3]) || 0;
         const pct = Number(r[2]) || 0;
         const width = Math.max(0, Math.min(100, pct));
-        const tone = lim ? (pct > 100 ? ' over' : pct >= 80 ? ' warn' : ' budget') : '';
+        const tone = lim ? (pct > 100 ? ' over' : pct >= 80 ? ' warn' : '') : '';
         h += '<div class="row"><span class="n">' + esc(r[0]) + '</span>';
         h += '<span class="t"><i class="' + tone + '" style="width:' + width + '%"></i></span>';
         h += '<span class="v">' + num(r[1]) + (lim ? ' / ' + num(lim) : ' ₽') + '</span></div>';
@@ -437,10 +378,9 @@ function render() {
   }
 
   h += '<div class="nav">';
-  h += btn('Текущий', 'report:current', active === 'current' ? 'on' : '');
-  h += btn('Прошлый', 'report:prev', active === 'prev' ? 'on' : '');
-  h += btn('Месяц', 'report:months:' + (s.y || ''), active === 'month' ? 'on' : '');
-  h += btn('Год', 'report:year:' + (s.y || ''), active === 'year' ? 'on' : '');
+  h += chip('Текущий', 'report:current', active === 'current' ? 'on' : '');
+  h += chip('Прошлый', 'report:prev', active === 'prev' ? 'on' : '');
+  h += chip('Месяц', 'report:months:' + (s.y || ''), active === 'month' ? 'on' : '');
   h += '</div>';
 
   if (kind === 'l') {
@@ -448,30 +388,21 @@ function render() {
     h += '<div class="months">';
     for (let m = 0; m < 12; m++) {
       const mm = ('0' + (m + 1)).slice(-2);
-      h += '<button class="b ' + (d.charAt(m) === '1' ? '' : 'off') + '" data-d="report:mon:' + s.y + '-' + mm + '">' + MONTHS[m] + '</button>';
+      h += chip(MONTHS[m], 'report:mon:' + s.y + '-' + mm, d.charAt(m) === '1' ? '' : 'off');
     }
     h += '</div>';
   }
   if (kind === 'm' && s.v) {
-    h += '<div class="nav">' + btn('‹', 'report:mp:' + s.v) + btn('›', 'report:mn:' + s.v) + '</div>';
-  }
-  if (kind === 'y' && s.y) {
-    h += '<div class="nav">' + btn('‹ ' + (s.y - 1), 'report:yp:' + s.y) + btn((s.y + 1) + ' ›', 'report:yn:' + s.y) + '</div>';
+    h += '<div class="nav">' + chip('‹', 'report:mp:' + s.v) + chip('›', 'report:mn:' + s.v) + '</div>';
   }
 
   root.innerHTML = h;
 }
-root.addEventListener('click', (e) => {
-  const d = e.target && e.target.dataset ? e.target.dataset.d : null;
-  if (!d) return;
-  e.target.disabled = true;
-  TelegramWidget.request(d).catch(() => { e.target.disabled = false; });
-});
-try { TelegramWidget.onEvent('chatDataChanged', render); } catch (e) {}
-render();
-setInterval(render, 1500);
-</script>
-<style>
+bind(root);
+start(render);
+"""
+
+REPORT_CSS = """
 .w{font:14px system-ui,sans-serif;color:var(--tg-theme-text-color);padding:4px 2px}
 .hdr{font-size:13px;font-weight:600;margin-bottom:8px}
 .tot{display:flex;gap:10px;margin-bottom:10px}
@@ -482,70 +413,22 @@ setInterval(render, 1500);
 .n{width:88px;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .t{flex:1;height:8px;border-radius:4px;background:var(--tg-theme-secondary-bg-color);overflow:hidden}
 .t i{display:block;height:100%;border-radius:4px;background:var(--tg-theme-button-color)}
-.v{width:96px;text-align:right;font-size:10px;color:var(--tg-theme-hint-color)}
-.bud{font-size:11px;color:var(--tg-theme-hint-color);margin-bottom:8px}
 .t i.over{background:#e5534b}
 .t i.warn{background:#f0a020}
+.v{width:96px;text-align:right;font-size:10px;color:var(--tg-theme-hint-color)}
+.bud{font-size:11px;color:var(--tg-theme-hint-color);margin-bottom:8px}
 .empty{color:var(--tg-theme-hint-color);font-size:13px;margin-bottom:10px}
 .nav{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .months{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .b{border:0;border-radius:6px;padding:4px 8px;background:var(--tg-theme-secondary-bg-color);color:var(--tg-theme-text-color);font-size:12px}
 .b.on{background:var(--tg-theme-button-color);color:var(--tg-theme-button-text-color)}
 .b.off{opacity:.45}
-</style>
 """
-    if compressed_size(markup) > MAX_COMPRESSED:
-        return ""
-    return markup
 
 
-def build_year_widget(rows: list[dict], year: int) -> str:
-    """Годовой виджет: 12 месяцев, полоски расходов."""
-    months = [summarize(rows, f"{year}-{number:02d}") for number in range(1, 13)]
-    income = sum(item.income for item in months)
-    expense = sum(item.expense for item in months)
-    balance = income - expense
-    if not any(item.count for item in months):
-        return ""
-
-    maximum = max((item.expense for item in months), default=0.0) or 1.0
-    bars: list[str] = []
-    for label, item in zip(MONTH_SHORT, months):
-        share = item.expense / maximum * 100
-        bars.append(
-            f'<div class="r"><span class="n">{label}</span>'
-            f'<span class="t"><i style="width:{share:.0f}%"></i></span>'
-            f'<span class="v">{format_rub(item.expense)}</span></div>'
-        )
-
-    markup = f"""
-<div class="w">
-  <div class="totals">
-    <div><span>Доход</span><b>{format_rub(income)} ₽</b></div>
-    <div><span>Расход</span><b>{format_rub(expense)} ₽</b></div>
-    <div><span>Остаток</span><b>{format_rub(balance)} ₽</b></div>
-  </div>
-  <div class="bars">{''.join(bars)}</div>
-</div>
-<style>
-.w{{font:14px system-ui,sans-serif;color:var(--tg-theme-text-color);padding:4px 2px}}
-.totals{{display:flex;gap:10px;margin-bottom:12px}}
-.totals div{{flex:1}}
-.totals span{{display:block;color:var(--tg-theme-hint-color);font-size:12px}}
-.r{{display:flex;align-items:center;gap:8px;margin:4px 0}}
-.n{{width:34px;font-size:12px;color:var(--tg-theme-hint-color)}}
-.t{{flex:1;height:7px;border-radius:4px;background:var(--tg-theme-secondary-bg-color);overflow:hidden}}
-.t i{{display:block;height:100%;border-radius:4px;background:var(--tg-theme-button-color)}}
-.v{{width:68px;text-align:right;font-size:12px;color:var(--tg-theme-hint-color)}}
-</style>
-"""
-    if compressed_size(markup) > MAX_COMPRESSED:
-        return ""
-    return markup
-
-
-def year_caption(year: int) -> str:
-    return f"📊 Отчёт за {year} год"
+def build_report_shell() -> str:
+    """Оболочка отчёта: периоды и данные переключаются через chatData."""
+    return _shell(REPORT_JS, REPORT_CSS)
 
 
 async def send_widget(

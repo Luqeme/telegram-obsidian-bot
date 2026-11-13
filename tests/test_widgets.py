@@ -6,20 +6,15 @@ import asyncio
 
 import httpx
 
-from services.money import summarize
 from services.widgets import (
     MAX_COMPRESSED,
     WeeklyReview,
     build_report_shell,
-    build_report_widget,
     build_today_widget,
     build_weekly_widget,
-    build_year_widget,
     compressed_size,
-    report_caption,
     send_widget,
     weekly_caption,
-    year_caption,
 )
 
 ROWS = [
@@ -47,50 +42,15 @@ ROWS = [
 ]
 
 
-def test_widget_contains_totals_and_categories() -> None:
-    summary = summarize(ROWS, "2026-10")
-    markup = build_report_widget(summary, "2026-10")
-
-    assert "90 000" in markup
-    assert "27 000" in markup
-    assert "Аренда" in markup
-    assert "Еда" in markup
-    assert 'class="t"' in markup
-
-
-def test_widget_fits_telegram_limit() -> None:
-    summary = summarize(ROWS, "2026-10")
-    markup = build_report_widget(summary, "2026-10")
-
-    assert markup
-    assert compressed_size(markup) <= MAX_COMPRESSED
-
-
-def test_widget_escapes_category() -> None:
-    rows = [
-        {
-            "date": "2026-10-01",
-            "kind": "expense",
-            "amount": "100",
-            "category": "<b>злые</b>",
-            "note": "",
-        }
-    ]
-    markup = build_report_widget(summarize(rows, "2026-10"), "2026-10")
-
-    assert "&lt;b&gt;злые&lt;/b&gt;" in markup
-    assert "<b>злые</b>" not in markup
-
-
 def test_today_widget_shell_reads_chat_data() -> None:
     markup = build_today_widget()
 
     assert markup
     assert "TelegramWidget.chatData" in markup
     assert "chatDataChanged" in markup
-    assert "data = 'done:' + el.dataset.id" in markup
-    assert "data-act=\"due\"" in markup
-    assert "data-act=\"more\"" in markup
+    assert "'done:' + t.i" in markup
+    assert "'due:' + t.i" in markup
+    assert "'more:' + (off + tasks.length)" in markup
     assert compressed_size(markup) <= MAX_COMPRESSED
 
 
@@ -245,20 +205,7 @@ def test_weekly_widget_contains_review() -> None:
 def test_today_widget_shell_requests_done() -> None:
     markup = build_today_widget()
 
-    assert "TelegramWidget.request(data)" in markup
-
-
-def test_year_widget_contains_months_and_fits() -> None:
-    markup = build_year_widget(ROWS, 2026)
-
-    assert markup
-    assert "окт" in markup
-    assert compressed_size(markup) <= MAX_COMPRESSED
-    assert year_caption(2026) == "📊 Отчёт за 2026 год"
-
-
-def test_year_widget_empty_year() -> None:
-    assert build_year_widget(ROWS, 2025) == ""
+    assert "TelegramWidget.request(request)" in markup
 
 
 def test_report_shell_is_stateful_and_fits() -> None:
@@ -271,7 +218,8 @@ def test_report_shell_is_stateful_and_fits() -> None:
     assert "chatDataChanged" in markup
     assert "report:current" in markup
     assert "report:months:" in markup
-    assert 'request(d)' in markup
+    assert "TelegramWidget.request(request)" in markup
+    assert "report:year" not in markup
     assert compressed_size(markup) <= MAX_COMPRESSED
 
     script = re.search(r"<script>(.*?)</script>", markup, re.S)
@@ -338,15 +286,6 @@ def test_report_year_and_months_states() -> None:
 
     now = datetime(2026, 11, 15, tzinfo=timezone.utc)
 
-    year = report_state(ROWS, "year:2026", now)
-    assert year["k"] == "y"
-    assert year["y"] == 2026
-    assert year["e"] == 27000
-    assert year["a"] == "year"
-    assert [row[0] for row in year["r"]] == ["окт"]
-    assert report_state(ROWS, "yp:2026", now)["y"] == 2025
-    assert report_state(ROWS, "yn:2026", now)["y"] == 2027
-
     months = report_state(ROWS, "months:2026", now)
     assert months["k"] == "l"
     assert months["y"] == 2026
@@ -374,12 +313,6 @@ def test_report_state_fits_chat_data_limit() -> None:
 
     assert len(payload.encode("utf-8")) <= REPORT_STATE_LIMIT
     assert len(state["r"]) < 8
-
-
-def test_caption_is_short() -> None:
-    caption = report_caption("2026-10")
-
-    assert caption == "📊 Отчёт за октябрь 2026"
 
 
 def test_send_widget_payload() -> None:

@@ -53,7 +53,7 @@ def test_menu_has_all_actions() -> None:
     assert all(1 <= len(row) <= 2 for row in keyboard.inline_keyboard)
 
 
-def test_report_menu_has_four_periods() -> None:
+def test_report_menu_has_periods() -> None:
     keyboard = report_menu()
     data = [
         button.callback_data
@@ -61,7 +61,7 @@ def test_report_menu_has_four_periods() -> None:
         for button in row
     ]
 
-    assert data == ["rep:now", "rep:prev", "rep:months", "rep:year", "rep:main"]
+    assert data == ["rep:now", "rep:prev", "rep:months", "rep:main"]
 
 
 def test_months_menu_lists_months_with_data() -> None:

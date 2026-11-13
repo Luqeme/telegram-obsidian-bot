@@ -188,8 +188,8 @@ def test_spend_widget_shell() -> None:
     assert markup
     assert "TelegramWidget.chatData" in markup
     assert "chatDataChanged" in markup
-    assert "data-d=\"cat:" in markup
-    assert "data-d=\"undo:" in markup
+    assert "'cat:' + s.a" in markup
+    assert "'undo:' + s.a" in markup
     assert compressed_size(markup) <= MAX_COMPRESSED
 
     script = re.search(r"<script>(.*?)</script>", markup, re.S)

@@ -30,7 +30,6 @@ from services.money import (
     summarize,
 )
 from services.widgets import (
-    MONTH_SHORT,
     build_report_shell,
     send_widget,
 )
@@ -87,8 +86,9 @@ async def on_report(callback: CallbackQuery, services: Services) -> None:
     views = {
         "now": "current",
         "prev": "prev",
-        "year": f"year:{now_year}",
         "months": f"months:{now_year}",
+        # старые кнопки «Год» из подменю открывают сетку месяцев
+        "year": f"months:{now_year}",
     }
     if action in views:
         await send_report(callback.bot, chat_id, services, views[action])
@@ -124,7 +124,6 @@ def report_menu() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(text="Месяц", callback_data="rep:months"),
-                InlineKeyboardButton(text="Год", callback_data="rep:year"),
             ],
             [InlineKeyboardButton(text="◀ Меню", callback_data="rep:main")],
         ]
@@ -213,7 +212,7 @@ async def send_report(
 def report_state(
     rows: list[dict], view: str, now: datetime, budgets: dict[str, float] | None = None
 ) -> dict:
-    """Состояние виджета отчёта для вида ``current``/``prev``/``mon:``/``year:``..."""
+    """Состояние виджета отчёта для вида ``current``/``prev``/``mon:``/``months:``."""
     budgets = budgets or {}
     now_month = now.strftime("%Y-%m")
     parts = view.split(":")
@@ -226,8 +225,6 @@ def report_state(
         return _month_state(rows, previous_month(now_month), now_month, budgets)
     if kind == "months":
         return _months_state(rows, _year(argument, now.year))
-    if kind == "year":
-        return _year_state(rows, _year(argument, now.year), now.year)
     if kind == "mon":
         month = _parse_month(argument) or now_month
         return _month_state(rows, month, now_month, budgets)
@@ -235,9 +232,6 @@ def report_state(
         month = _parse_month(argument) or now_month
         shift = -1 if kind == "mp" else 1
         return _month_state(rows, _shift_month(month, shift), now_month, budgets)
-    if kind in ("yp", "yn"):
-        year = _year(argument, now.year)
-        return _year_state(rows, year + (-1 if kind == "yp" else 1), now.year)
     return _month_state(rows, now_month, now_month, budgets)
 
 
@@ -273,29 +267,6 @@ def _month_state(
         "b": round(summary.balance),
         "r": items,
         "a": active,
-    }
-
-
-def _year_state(rows: list[dict], year: int, now_year: int) -> dict:
-    months = [summarize(rows, f"{year}-{number:02d}") for number in range(1, 13)]
-    income = sum(item.income for item in months)
-    expense = sum(item.expense for item in months)
-    maximum = max((item.expense for item in months), default=0.0) or 1.0
-    items = [
-        [MONTH_SHORT[index], round(item.expense), round(item.expense / maximum * 100)]
-        for index, item in enumerate(months)
-        if item.count
-    ]
-    return {
-        "k": "y",
-        "v": str(year),
-        "y": year,
-        "t": f"{year} год",
-        "i": round(income),
-        "e": round(expense),
-        "b": round(income - expense),
-        "r": items,
-        "a": "year" if year == now_year else "",
     }
 
 
@@ -387,13 +358,6 @@ async def _send_report_state(
             parse_mode="HTML",
             reply_markup=months_menu(rows),
         )
-    elif state["k"] == "y":
-        await bot.send_message(
-            chat_id,
-            render_year(rows, state["y"]),
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-        )
     else:
         await bot.send_message(
             chat_id,
@@ -409,12 +373,6 @@ async def _send_month_report(
     await _send_report(message, services, f"mon:{month}")
 
 
-async def _send_year_report(
-    message: Message, services: Services, year: int
-) -> None:
-    await _send_report(message, services, f"year:{year}")
-
-
 async def _send_month_widget(
     bot: Bot,
     chat_id: int,
@@ -423,16 +381,6 @@ async def _send_month_widget(
     month: str,
 ) -> None:
     await _send_report_state(bot, chat_id, services, rows, f"mon:{month}")
-
-
-async def _send_year_widget(
-    bot: Bot,
-    chat_id: int,
-    services: Services,
-    rows: list[dict],
-    year: int,
-) -> None:
-    await _send_report_state(bot, chat_id, services, rows, f"year:{year}")
 
 
 def render_report(rows: list[dict], month: str) -> str:
@@ -480,30 +428,6 @@ def render_report(rows: list[dict], month: str) -> str:
             ]
         )
 
-    return "\n".join(lines)
-
-
-def render_year(rows: list[dict], year: int) -> str:
-    months = [summarize(rows, f"{year}-{number:02d}") for number in range(1, 13)]
-    if not any(item.count for item in months):
-        return f"📊 <b>Отчёт за {year} год</b>\n\nЗаписей нет."
-
-    income = sum(item.income for item in months)
-    expense = sum(item.expense for item in months)
-    lines = [
-        f"📊 <b>Отчёт за {year} год</b>",
-        "",
-        f"Доход: <b>{format_rub(income)} ₽</b>",
-        f"Расход: <b>{format_rub(expense)} ₽</b>",
-        f"Остаток: <b>{format_rub(income - expense)} ₽</b>",
-    ]
-    for item in months:
-        if not item.count:
-            continue
-        lines.append(
-            f"• {month_label(item.month)} — расход "
-            f"{format_rub(item.expense)} ₽, доход {format_rub(item.income)} ₽"
-        )
     return "\n".join(lines)
 
 
