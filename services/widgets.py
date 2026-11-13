@@ -39,7 +39,6 @@ function bind(root) {
 function start(render) {
   try { TelegramWidget.onEvent('chatDataChanged', () => render(false)); } catch (e) {}
   render(false);
-  setInterval(() => { if (!document.hidden) render(false); }, 3000);
 }
 """.strip()
 
