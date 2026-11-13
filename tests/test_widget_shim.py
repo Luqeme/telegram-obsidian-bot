@@ -520,3 +520,128 @@ def test_handler_pages_today_tasks() -> None:
     assert calls["answer"] == "ok"
     assert json.loads(calls["edit"])["off"] == 5
 
+
+def _money_services(raw: str, today: str = "2026-11-13"):
+    import zoneinfo
+
+    from services.money import note_hash
+
+    calls: dict[str, object] = {}
+
+    class FakeGithub:
+        async def get_text(self, path: str) -> str:
+            calls["get"] = path
+            return calls.setdefault("raw", raw)
+
+        async def replace_line(self, path, old_line, new_line, message) -> bool:
+            calls["replace"] = (old_line, new_line)
+            calls["raw"] = calls["raw"].replace(old_line, new_line)
+            return True
+
+        async def remove_lines(self, path, lines, message) -> int:
+            calls["removed"] = lines
+            calls["raw"] = "\n".join(
+                line for line in str(calls["raw"]).splitlines() if line not in lines
+            )
+            return len(lines)
+
+    class FakeIndex:
+        async def money_categories(self) -> list[str]:
+            return ["Еда", "Аренда", "Автомобиль", "Прочее"]
+
+    settings = type(
+        "Settings",
+        (),
+        {
+            "telegram_bot_token": "token",
+            "allowed_user_ids": [2],
+            "tz": zoneinfo.ZoneInfo("UTC"),
+            "money_widget": "always",
+        },
+    )()
+    services = type(
+        "S", (), {"settings": settings, "github": FakeGithub(), "index": FakeIndex()}
+    )()
+    return services, calls, note_hash
+
+
+def test_handler_changes_spend_category() -> None:
+    from handlers import widgets as widget_handlers
+
+    raw = (
+        "date,kind,amount,category,note\n"
+        '2026-11-13,expense,540,Еда,"потратил 540 на обед"\n'
+    )
+    services, calls, note_hash = _money_services(raw)
+    digest = note_hash("потратил 540 на обед")
+    edits: list[str] = []
+
+    async def fake_answer(token, query_id, data="", **kwargs) -> bool:
+        calls["answer"] = data
+        return True
+
+    async def fake_edit(token, chat_id, message_id, chat_data, **kwargs) -> bool:
+        edits.append(chat_data)
+        return True
+
+    originals = (
+        widget_handlers.answer_widget_query,
+        widget_handlers.edit_widget_data,
+    )
+    widget_handlers.answer_widget_query = fake_answer
+    widget_handlers.edit_widget_data = fake_edit
+    try:
+        asyncio.run(
+            widget_handlers.on_widget_query(
+                _task_query(f"cat:540:{digest}:Автомобиль"), services
+            )
+        )
+    finally:
+        widget_handlers.answer_widget_query, widget_handlers.edit_widget_data = originals
+
+    assert calls["answer"] == "ok"
+    old_line, new_line = calls["replace"]
+    assert "Автомобиль" in new_line
+    assert "Еда" in old_line
+    assert edits
+    assert json.loads(edits[0])["c"] == "Автомобиль"
+
+
+def test_handler_cancels_spend() -> None:
+    from handlers import widgets as widget_handlers
+
+    raw = (
+        "date,kind,amount,category,note\n"
+        "2026-11-13,expense,540,Еда,обед\n"
+    )
+    services, calls, note_hash = _money_services(raw)
+    digest = note_hash("обед")
+    edits: list[str] = []
+
+    async def fake_answer(token, query_id, data="", **kwargs) -> bool:
+        calls["answer"] = data
+        return True
+
+    async def fake_edit(token, chat_id, message_id, chat_data, **kwargs) -> bool:
+        edits.append(chat_data)
+        return True
+
+    originals = (
+        widget_handlers.answer_widget_query,
+        widget_handlers.edit_widget_data,
+    )
+    widget_handlers.answer_widget_query = fake_answer
+    widget_handlers.edit_widget_data = fake_edit
+    try:
+        asyncio.run(
+            widget_handlers.on_widget_query(
+                _task_query(f"undo:540:{digest}"), services
+            )
+        )
+    finally:
+        widget_handlers.answer_widget_query, widget_handlers.edit_widget_data = originals
+
+    assert calls["answer"] == "ok"
+    assert calls["removed"] == ["2026-11-13,expense,540,Еда,обед"]
+    assert json.loads(edits[0])["s"] == "off"
+

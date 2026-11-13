@@ -64,6 +64,15 @@ class Settings(BaseSettings):
     digest_time: str = "09:00"
     weekly_ping_time: str = "10:00"
     monthly_report_time: str = "10:00"
+    money_widget: str = "always"
+
+    @field_validator("money_widget")
+    @classmethod
+    def _check_money_widget(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in {"always", "unknown"}:
+            raise ValueError("допустимо always или unknown")
+        return value
 
     @field_validator("digest_time", "weekly_ping_time", "monthly_report_time")
     @classmethod

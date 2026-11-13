@@ -270,6 +270,81 @@ def weekly_caption(review: WeeklyReview) -> str:
     return f"🗓 Итоги недели · {review.period}"
 
 
+def build_spend_widget() -> str:
+    """Оболочка виджета траты: категории и отмена прямо в сообщении."""
+    markup = r"""
+<div id="w" class="w"></div>
+<script>
+const root = document.getElementById('w');
+let last = null;
+function esc(v) { const d = document.createElement('div'); d.textContent = String(v ?? ''); return d.innerHTML; }
+function attr(v) { return esc(v).replace(/"/g, '&quot;'); }
+function money(v) { return Math.round(Number(v) || 0).toLocaleString('ru-RU') + ' ₽'; }
+function render() {
+  const raw = TelegramWidget.chatData;
+  if (!raw) {
+    root.textContent = 'Загрузка…';
+    return;
+  }
+  if (raw === last) return;
+  last = raw;
+  let s = {};
+  if (typeof raw === 'object') s = raw;
+  else { try { s = JSON.parse(raw); } catch (e) { return; } }
+
+  const income = s.g === 1;
+  let h = '<div class="hdr">' + (income ? 'Доход' : 'Расход');
+  if (s.t) h += ' · сегодня ' + money(s.t);
+  h += '</div>';
+  h += '<div class="sum ' + (income ? 'in' : '') + '">' + (income ? '+' : '−') + money(s.a) + '</div>';
+  if (s.n) h += '<div class="note">' + esc(s.n) + '</div>';
+
+  if (s.s === 'off') {
+    h += '<div class="off">Отменено</div>';
+    root.innerHTML = h;
+    return;
+  }
+
+  const chips = s.k || [];
+  if (chips.length) {
+    h += '<div class="chips">';
+    for (const c of chips) {
+      h += '<button class="b' + (c === s.c ? ' on' : '') + '" data-d="cat:' + attr(s.a) + ':' + attr(s.h) + ':' + attr(c) + '">' + esc(c) + '</button>';
+    }
+    h += '</div>';
+  }
+  h += '<div class="row"><button class="b del" data-d="undo:' + attr(s.a) + ':' + attr(s.h) + '">Отменить</button></div>';
+  root.innerHTML = h;
+}
+root.addEventListener('click', (e) => {
+  const d = e.target && e.target.dataset ? e.target.dataset.d : null;
+  if (!d) return;
+  e.target.disabled = true;
+  TelegramWidget.request(d).catch(() => { e.target.disabled = false; });
+});
+try { TelegramWidget.onEvent('chatDataChanged', render); } catch (e) {}
+render();
+setInterval(render, 1500);
+</script>
+<style>
+.w{font:14px system-ui,sans-serif;color:var(--tg-theme-text-color);padding:4px 2px}
+.hdr{font-size:12px;color:var(--tg-theme-hint-color);margin-bottom:4px}
+.sum{font-size:22px;font-weight:600;margin-bottom:2px}
+.sum.in{color:#31a24c}
+.note{font-size:13px;color:var(--tg-theme-hint-color);margin-bottom:10px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.b{border:0;border-radius:8px;padding:5px 9px;background:var(--tg-theme-secondary-bg-color);color:var(--tg-theme-text-color);font-size:12px}
+.b.on{background:var(--tg-theme-button-color);color:var(--tg-theme-button-text-color)}
+.row{display:flex;gap:6px}
+.b.del{background:transparent;color:var(--tg-theme-destructive-text-color);border:1px solid var(--tg-theme-secondary-bg-color);font-size:11px}
+.off{font-size:13px;color:var(--tg-theme-hint-color);margin-top:6px}
+</style>
+"""
+    if compressed_size(markup) > MAX_COMPRESSED:
+        return ""
+    return markup
+
+
 def report_caption(month: str) -> str:
     return f"📊 Отчёт за {month_label(month)}"
 

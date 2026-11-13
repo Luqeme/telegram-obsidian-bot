@@ -38,6 +38,13 @@ from services import (
 )
 from services.undo import Action, UndoStore
 from services.notes_index import STOPWORDS, WORD_RE, TaskRef
+from services.money import (
+    day_expense,
+    dumps_spend_state,
+    parse_rows,
+    spend_state,
+)
+from services.widgets import build_spend_widget, send_widget
 
 logger = logging.getLogger(__name__)
 
@@ -540,7 +547,6 @@ async def _process(
 
     known_tags: list[str] = []
     project_context = ""
-    money_categories: list[str] = []
     try:
         known_tags = await services.index.top_tags(limit=30)
     except GitHubError as exc:
@@ -548,12 +554,7 @@ async def _process(
 
     _, project_context = await _index_context(services)
 
-    try:
-        money_categories = await services.index.money_categories()
-    except GitHubError as exc:
-        logger.warning("Не удалось получить категории денег: %s", exc)
-    if not money_categories:
-        money_categories = list(DEFAULT_MONEY_CATEGORIES)
+    categories = await money_categories(services)
 
     try:
         draft = await services.groq.structure_note(
@@ -562,7 +563,7 @@ async def _process(
             today=now.date(),
             known_tags=known_tags,
             known_projects=project_context,
-            money_categories=money_categories,
+            money_categories=categories,
         )
     except GroqError as exc:
         logger.error("structure_note: %s", exc)
@@ -1053,13 +1054,14 @@ async def _save_money(
 ) -> None:
     category = _clean_cell(draft.money_category, limit=30) or "Прочее"
     amount = _format_amount(round(float(draft.money_amount), 2))
+    note = _clean_cell(original)
     row = _csv_row(
         [
             created.strftime("%Y-%m-%d"),
             draft.money_kind,
             amount,
             category,
-            _clean_cell(original),
+            note,
         ]
     )
 
@@ -1084,10 +1086,71 @@ async def _save_money(
         message,
         Action(kind="lines", path=MONEY_PATH, lines=[row], label="транзакция"),
     )
+
+    caption = f"💰 {kind} {sign}{amount} ₽ · {category}"
+    if _want_spend_widget(services, category):
+        state = await _spend_state(
+            services,
+            kind=draft.money_kind,
+            amount=float(draft.money_amount),
+            category=category,
+            note=note,
+        )
+        markup = build_spend_widget()
+        if markup:
+            ok, reason = await send_widget(
+                services.settings.telegram_bot_token,
+                message.chat.id,
+                markup,
+                caption,
+                allow_queries=True,
+                chat_data=dumps_spend_state(state),
+            )
+            if ok:
+                return
+            logger.warning("spend_widget: %s", reason)
+
     await message.answer(
         f"💰 <b>{kind} записан</b>\n\n"
         f"{sign}{amount} ₽ · {html.escape(category)}",
         parse_mode="HTML",
+    )
+
+
+async def money_categories(services: Services) -> list[str]:
+    try:
+        categories = await services.index.money_categories()
+    except GitHubError as exc:
+        logger.warning("Не удалось получить категории денег: %s", exc)
+        categories = []
+    return categories or list(DEFAULT_MONEY_CATEGORIES)
+
+
+def _want_spend_widget(services: Services, category: str) -> bool:
+    return services.settings.money_widget == "always" or category == "Прочее"
+
+
+async def _spend_state(
+    services: Services,
+    *,
+    kind: str,
+    amount: float,
+    category: str,
+    note: str,
+) -> dict:
+    today = datetime.now(services.settings.tz).date().isoformat()
+    try:
+        rows = parse_rows(await services.github.get_text(MONEY_PATH))
+    except GitHubError as exc:
+        logger.warning("spend widget: %s", exc)
+        rows = []
+    return spend_state(
+        amount=amount,
+        kind=kind,
+        category=category,
+        note=note,
+        categories=await money_categories(services),
+        today_total=day_expense(rows, today),
     )
 
 

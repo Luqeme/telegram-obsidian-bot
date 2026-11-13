@@ -6,10 +6,21 @@ import logging
 from datetime import datetime, timedelta
 
 from services import GitHubError, Services
+from services.money import (
+    MONEY_PATH,
+    day_expense,
+    dumps_spend_state,
+    find_row_line,
+    parse_rows,
+    replace_row_category,
+    spend_state,
+    to_amount,
+)
 from services.notes_index import with_due
 from services.widget_shim import WidgetQuery, answer_widget_query, edit_widget_data
 
 from .digest import build_today_state, collect_today, dumps_state
+from .notes import money_categories
 from .report import dumps_report_state, read_money, report_state
 
 logger = logging.getLogger(__name__)
@@ -38,6 +49,12 @@ async def on_widget_query(query: WidgetQuery, services: Services) -> None:
             return
         if data.startswith("prev:"):
             await _page_today(services, token, query, data[5:])
+            return
+        if data.startswith("cat:"):
+            await _set_category(services, token, query, data[4:])
+            return
+        if data.startswith("undo:"):
+            await _cancel_spend(services, token, query, data[5:])
             return
         if data.startswith(REPORT_PREFIX):
             await _report(services, token, query, data[len(REPORT_PREFIX):])
@@ -217,3 +234,119 @@ async def _report(
     )
     if not ok:
         logger.warning("widget report refresh failed chat=%s", query.chat.id)
+
+
+async def _set_category(
+    services: Services, token: str, query: WidgetQuery, payload: str
+) -> None:
+    """Меняет категорию только что записанной траты."""
+    amount, _, rest = payload.partition(":")
+    digest, _, category = rest.partition(":")
+    category = category.strip()
+    if not category:
+        await answer_widget_query(token, query.id, "unknown")
+        return
+
+    try:
+        raw = await services.github.get_text(MONEY_PATH)
+        change = replace_row_category(raw, amount, digest, category)
+    except GitHubError as exc:
+        logger.error("widget cat: %s", exc)
+        await answer_widget_query(token, query.id, "error")
+        return
+
+    if change is None:
+        await answer_widget_query(token, query.id, "changed")
+        return
+
+    old_line, new_line, values = change
+    if old_line == new_line:
+        await answer_widget_query(token, query.id, "same")
+        return
+
+    try:
+        updated = await services.github.replace_line(
+            MONEY_PATH, old_line, new_line, f"Money category: {category}"
+        )
+    except GitHubError as exc:
+        logger.error("widget cat: %s", exc)
+        await answer_widget_query(token, query.id, "error")
+        return
+
+    if not updated:
+        await answer_widget_query(token, query.id, "changed")
+        return
+
+    logger.info("money_category_widget category=%s", category)
+    await answer_widget_query(token, query.id, "ok")
+    await _refresh_spend(services, token, query, values)
+
+
+async def _cancel_spend(
+    services: Services, token: str, query: WidgetQuery, payload: str
+) -> None:
+    """Отменяет только что записанную трату."""
+    amount, _, digest = payload.partition(":")
+
+    try:
+        raw = await services.github.get_text(MONEY_PATH)
+        found = find_row_line(raw, amount, digest)
+    except GitHubError as exc:
+        logger.error("widget undo spend: %s", exc)
+        await answer_widget_query(token, query.id, "error")
+        return
+
+    if found is None:
+        await answer_widget_query(token, query.id, "changed")
+        return
+
+    line, values = found
+    try:
+        removed = await services.github.remove_lines(
+            MONEY_PATH, [line], "Money: cancel"
+        )
+    except GitHubError as exc:
+        logger.error("widget undo spend: %s", exc)
+        await answer_widget_query(token, query.id, "error")
+        return
+
+    if not removed:
+        await answer_widget_query(token, query.id, "changed")
+        return
+
+    logger.info("money_cancel_widget amount=%s", amount)
+    await answer_widget_query(token, query.id, "ok")
+    await _refresh_spend(services, token, query, values, status="off")
+
+
+async def _refresh_spend(
+    services: Services,
+    token: str,
+    query: WidgetQuery,
+    values: list[str],
+    status: str = "ok",
+) -> None:
+    if query.chat is None or query.message_id is None:
+        return
+
+    today = datetime.now(services.settings.tz).date().isoformat()
+    try:
+        rows = parse_rows(await services.github.get_text(MONEY_PATH))
+    except GitHubError:
+        rows = []
+
+    state = spend_state(
+        amount=to_amount(values[2]),
+        kind=values[1],
+        category=values[3],
+        note=values[4],
+        categories=await money_categories(services),
+        today_total=day_expense(rows, today),
+        status=status,
+    )
+    await edit_widget_data(
+        token,
+        query.chat.id,
+        query.message_id,
+        dumps_spend_state(state),
+    )

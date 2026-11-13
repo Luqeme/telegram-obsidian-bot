@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
+import json
 from dataclasses import dataclass, field
 
 MONEY_PATH = "30_Money/transactions.csv"
+SPEND_CHIPS = 8
+SPEND_STATE_LIMIT = 1024
+REQUEST_LIMIT = 64
 
 MONTHS = (
     "январь",
@@ -106,3 +111,113 @@ def summarize(rows: list[dict], month: str) -> MonthSummary:
     summary.top_expenses.sort(key=lambda item: -item["amount"])
     summary.top_expenses = summary.top_expenses[:5]
     return summary
+
+
+def note_hash(note: str) -> str:
+    """Короткий отпечаток заметки: по нему виджет находит свою строку в CSV."""
+    return hashlib.sha1(note.encode("utf-8")).hexdigest()[:6]
+
+
+def csv_row(values: list[str]) -> str:
+    buffer = io.StringIO()
+    csv.writer(buffer).writerow(values)
+    return buffer.getvalue().rstrip("\r\n")
+
+
+def locate_row(raw: str, amount: object, digest: str) -> tuple[int, list[str]] | None:
+    """Последняя строка CSV с такой суммой и отпечатком заметки."""
+    target = to_amount(amount)
+    lines = raw.splitlines()
+    for index in range(len(lines) - 1, 0, -1):
+        line = lines[index]
+        if not line.strip():
+            continue
+        try:
+            values = next(csv.reader([line]))
+        except (csv.Error, StopIteration):
+            continue
+        if len(values) != 5:
+            continue
+        if to_amount(values[2]) != target:
+            continue
+        if note_hash(values[4]) != digest:
+            continue
+        return index, values
+    return None
+
+
+def replace_row_category(
+    raw: str, amount: object, digest: str, category: str
+) -> tuple[str, str, list[str]] | None:
+    """(старая строка, новая строка, поля) или None, если строку не нашли."""
+    found = locate_row(raw, amount, digest)
+    if found is None:
+        return None
+    index, values = found
+    old_line = raw.splitlines()[index]
+    values[3] = category
+    return old_line, csv_row(values), values
+
+
+def find_row_line(raw: str, amount: object, digest: str) -> tuple[str, list[str]] | None:
+    found = locate_row(raw, amount, digest)
+    if found is None:
+        return None
+    index, values = found
+    return raw.splitlines()[index], values
+
+
+def day_expense(rows: list[dict], date: str) -> float:
+    return sum(
+        to_amount(row.get("amount"))
+        for row in rows
+        if str(row.get("date", "")) == date and row.get("kind") == "expense"
+    )
+
+
+def spend_state(
+    *,
+    amount: float,
+    kind: str,
+    category: str,
+    note: str,
+    categories: list[str],
+    today_total: float,
+    status: str = "ok",
+) -> dict:
+    """Состояние виджета траты: сумма, заметка, категории, статус."""
+    value: float | int = (
+        int(amount) if float(amount).is_integer() else round(float(amount), 2)
+    )
+    digest = note_hash(note)
+    chips = [
+        name
+        for name in categories
+        if len(f"cat:{value}:{digest}:{name}".encode("utf-8")) <= REQUEST_LIMIT
+    ][:SPEND_CHIPS]
+    if (
+        category
+        and category not in chips
+        and len(f"cat:{value}:{digest}:{category}".encode("utf-8")) <= REQUEST_LIMIT
+    ):
+        chips.insert(0, category)
+    return {
+        "a": value,
+        "g": 1 if kind == "income" else 0,
+        "c": category,
+        "n": note[:40],
+        "h": digest,
+        "k": chips,
+        "t": round(today_total),
+        "s": status,
+    }
+
+
+def dumps_spend_state(state: dict) -> str:
+    state = dict(state)
+    state["k"] = list(state.get("k", []))
+    payload = json.dumps(state, ensure_ascii=False)
+    while state["k"] and len(payload.encode("utf-8")) > SPEND_STATE_LIMIT:
+        state["k"].pop()
+        payload = json.dumps(state, ensure_ascii=False)
+    return payload
