@@ -41,16 +41,12 @@ from services.notes_index import STOPWORDS, WORD_RE, TaskRef
 from services.money import (
     budget_status,
     category_spent,
-    day_expense,
-    dumps_spend_state,
     format_rub,
     match_category,
     parse_limit_phrase,
     parse_rows,
-    spend_state,
 )
 from services.notes_index import set_money_limit
-from services.widgets import build_spend_widget, send_widget
 
 logger = logging.getLogger(__name__)
 
@@ -1099,29 +1095,6 @@ async def _save_money(
         Action(kind="lines", path=MONEY_PATH, lines=[row], label="транзакция"),
     )
 
-    caption = f"💰 {kind} {sign}{amount} ₽ · {category}"
-    if _want_spend_widget(services, category):
-        state = await _spend_state(
-            services,
-            kind=draft.money_kind,
-            amount=float(draft.money_amount),
-            category=category,
-            note=note,
-        )
-        markup = build_spend_widget()
-        if markup:
-            ok, reason = await send_widget(
-                services.settings.telegram_bot_token,
-                message.chat.id,
-                markup,
-                caption,
-                allow_queries=True,
-                chat_data=dumps_spend_state(state),
-            )
-            if ok:
-                return
-            logger.warning("spend_widget: %s", reason)
-
     await message.answer(
         f"💰 <b>{kind} записан</b>\n\n"
         f"{sign}{amount} ₽ · {html.escape(category)}",
@@ -1136,40 +1109,6 @@ async def money_categories(services: Services) -> list[str]:
         logger.warning("Не удалось получить категории денег: %s", exc)
         categories = []
     return categories or list(DEFAULT_MONEY_CATEGORIES)
-
-
-def _want_spend_widget(services: Services, category: str) -> bool:
-    return services.settings.money_widget == "always" or category == "Прочее"
-
-
-async def _spend_state(
-    services: Services,
-    *,
-    kind: str,
-    amount: float,
-    category: str,
-    note: str,
-) -> dict:
-    now = datetime.now(services.settings.tz)
-    today = now.date().isoformat()
-    month = now.strftime("%Y-%m")
-    try:
-        rows = parse_rows(await services.github.get_text(MONEY_PATH))
-    except GitHubError as exc:
-        logger.warning("spend widget: %s", exc)
-        rows = []
-    budgets = await _money_budgets(services)
-    limit = budgets.get(category.casefold(), 0.0)
-    return spend_state(
-        amount=amount,
-        kind=kind,
-        category=category,
-        note=note,
-        categories=await money_categories(services),
-        today_total=day_expense(rows, today),
-        limit=limit,
-        spent=category_spent(rows, month, category) if limit else 0.0,
-    )
 
 
 async def _money_budgets(services: Services) -> dict[str, float]:

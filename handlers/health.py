@@ -6,6 +6,7 @@ import asyncio
 import html
 import logging
 import re
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
 from aiogram import Bot
@@ -13,12 +14,6 @@ from aiogram.exceptions import TelegramAPIError
 
 from services import GitHubError, Services
 from services.money import MONEY_PATH, parse_rows, to_amount
-from services.widgets import (
-    WeeklyReview,
-    build_weekly_widget,
-    send_widget,
-    weekly_caption,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +22,35 @@ SUNDAY = 6
 DONE_TASK_RE = re.compile(
     r"^- \[[xX]\] .+?✅\s*(\d{4}-\d{2}-\d{2})", re.MULTILINE
 )
+
+
+@dataclass(slots=True)
+class WeeklyReview:
+    period: str
+    notes_week: int
+    tasks_done: int
+    tasks_open: int
+    overdue: int
+    inbox: int
+    inbox_stale: int
+    expense: float
+    income: float
+    prev_expense: float
+    prev_income: float
+    projects_idle: list[str] = field(default_factory=list)
+
+    @property
+    def has_data(self) -> bool:
+        return any(
+            (
+                self.notes_week,
+                self.tasks_done,
+                self.tasks_open,
+                self.inbox,
+                self.expense,
+                self.income,
+            )
+        )
 
 
 async def health_loop(bot: Bot, services: Services) -> None:
@@ -67,7 +91,7 @@ async def check_and_report(bot: Bot, services: Services) -> list[str]:
 
 
 async def weekly_loop(bot: Bot, services: Services) -> None:
-    """Воскресный обзор недели виджетом."""
+    """Воскресный обзор недели."""
     while True:
         delay = _seconds_until_weekday(
             services.settings.weekly_ping_time, SUNDAY, services.settings.tz
@@ -169,28 +193,13 @@ async def send_weekly(bot: Bot, services: Services) -> bool:
     if not review.has_data:
         return False
 
-    markup = build_weekly_widget(review)
     text = render_weekly(review)
 
     for user_id in services.settings.allowed_user_ids:
-        sent = False
-        if markup:
-            ok, reason = await send_widget(
-                services.settings.telegram_bot_token,
-                user_id,
-                markup,
-                weekly_caption(review),
-            )
-            if ok:
-                sent = True
-            else:
-                logger.warning("weekly_widget: %s", reason)
-
-        if not sent:
-            try:
-                await bot.send_message(user_id, text, parse_mode="HTML")
-            except TelegramAPIError as exc:
-                logger.warning("Недельный обзор не ушёл %s: %s", user_id, exc)
+        try:
+            await bot.send_message(user_id, text, parse_mode="HTML")
+        except TelegramAPIError as exc:
+            logger.warning("Недельный обзор не ушёл %s: %s", user_id, exc)
 
     return True
 

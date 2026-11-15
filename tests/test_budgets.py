@@ -174,7 +174,6 @@ def _budget_services(raw: str, budgets: dict[str, float] | None = None):
         (),
         {
             "tz": zoneinfo.ZoneInfo("UTC"),
-            "money_widget": "always",
             "telegram_bot_token": "token",
         },
     )()

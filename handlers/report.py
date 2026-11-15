@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import html
-import json
 import logging
 from datetime import datetime, timezone
 
@@ -29,10 +28,6 @@ from services.money import (
     previous_month,
     summarize,
 )
-from services.widgets import (
-    build_report_shell,
-    send_widget,
-)
 
 router = Router(name="report")
 logger = logging.getLogger(__name__)
@@ -41,9 +36,6 @@ MAIN_TEXT = "Главное меню:"
 REPORT_TEXT = "📊 <b>Отчёт</b>\n\nВыбери период:"
 MONTHS_TEXT = "📅 <b>Выбери месяц</b>"
 MONTHS_LIMIT = 12
-REPORT_CAPTION = "📊 Отчёт по деньгам"
-REPORT_STATE_LIMIT = 1024
-REPORT_ROWS = 6
 
 
 @router.message(Command("report"))
@@ -166,7 +158,7 @@ async def report_loop(bot: Bot, services: Services) -> None:
             if summarize(rows, month).count:
                 for user_id in services.settings.allowed_user_ids:
                     try:
-                        await _send_month_widget(
+                        await _send_month_text(
                             bot, user_id, services, rows, month
                         )
                     except TelegramAPIError as exc:
@@ -197,7 +189,7 @@ async def send_report(
     *,
     notify=None,
 ) -> None:
-    """Отправляет виджет отчёта в чат. notify — куда писать текст ошибки."""
+    """Присылает отчёт текстом. notify — куда писать текст ошибки."""
     logger.info("report send view=%r chat=%s", view, chat_id)
     try:
         rows = await _read_money(services)
@@ -206,107 +198,31 @@ async def send_report(
         if notify is not None:
             await notify(exc.user_message)
         return
-    await _send_report_state(bot, chat_id, services, rows, view)
 
-
-def report_state(
-    rows: list[dict], view: str, now: datetime, budgets: dict[str, float] | None = None
-) -> dict:
-    """Состояние виджета отчёта для вида ``current``/``prev``/``mon:``/``months:``."""
-    budgets = budgets or {}
-    now_month = now.strftime("%Y-%m")
-    parts = view.split(":")
-    kind = parts[0]
-    argument = parts[1] if len(parts) > 1 else ""
-
-    if kind == "current":
-        return _month_state(rows, now_month, now_month, budgets)
-    if kind == "prev":
-        return _month_state(rows, previous_month(now_month), now_month, budgets)
+    kind, _, argument = view.partition(":")
     if kind == "months":
-        return _months_state(rows, _year(argument, now.year))
-    if kind == "mon":
-        month = _parse_month(argument) or now_month
-        return _month_state(rows, month, now_month, budgets)
-    if kind in ("mp", "mn"):
-        month = _parse_month(argument) or now_month
-        shift = -1 if kind == "mp" else 1
-        return _month_state(rows, _shift_month(month, shift), now_month, budgets)
-    return _month_state(rows, now_month, now_month, budgets)
-
-
-def _month_state(
-    rows: list[dict],
-    month: str,
-    now_month: str,
-    budgets: dict[str, float] | None = None,
-) -> dict:
-    budgets = budgets or {}
-    summary = summarize(rows, month)
-    total = summary.expense or 1.0
-    items = []
-    for category, amount in summary.expense_categories[:REPORT_ROWS]:
-        limit = budgets.get(category.casefold(), 0.0)
-        share = amount / (limit or total) * 100
-        items.append(
-            [category, round(amount), round(min(share, 999)), round(limit)]
+        await bot.send_message(
+            chat_id,
+            MONTHS_TEXT,
+            parse_mode="HTML",
+            reply_markup=months_menu(rows),
         )
-    if month == now_month:
-        active = "current"
-    elif month == previous_month(now_month):
-        active = "prev"
+        return
+
+    now_month = datetime.now(services.settings.tz).strftime("%Y-%m")
+    if kind == "prev":
+        month = previous_month(now_month)
+    elif kind == "mon":
+        month = _parse_month(argument) or now_month
     else:
-        active = "month"
-    return {
-        "k": "m",
-        "v": month,
-        "y": int(month[:4]),
-        "t": month_label(month),
-        "i": round(summary.income),
-        "e": round(summary.expense),
-        "b": round(summary.balance),
-        "r": items,
-        "a": active,
-    }
+        month = now_month
 
-
-def _months_state(rows: list[dict], year: int) -> dict:
-    counts = [summarize(rows, f"{year}-{number:02d}").count for number in range(1, 13)]
-    return {
-        "k": "l",
-        "v": str(year),
-        "y": year,
-        "t": f"Выбери месяц · {year}",
-        "i": 0,
-        "e": 0,
-        "b": 0,
-        "r": [],
-        "a": "month",
-        "d": "".join("1" if count else "0" for count in counts),
-    }
-
-
-def dumps_report_state(state: dict) -> str:
-    """JSON состояния; подрезает строки, чтобы влезть в лимит chat_data."""
-    state = dict(state)
-    state["r"] = [list(row) for row in state.get("r", [])]
-    payload = json.dumps(state, ensure_ascii=False)
-    while state["r"] and len(payload.encode("utf-8")) > REPORT_STATE_LIMIT:
-        state["r"].pop()
-        payload = json.dumps(state, ensure_ascii=False)
-    return payload
-
-
-def _year(value: str, default: int) -> int:
-    if value.isdigit() and 2000 <= int(value) <= 2100:
-        return int(value)
-    return default
-
-
-def _shift_month(month: str, delta: int) -> str:
-    year, number = (int(part) for part in month.split("-"))
-    index = year * 12 + (number - 1) + delta
-    return f"{index // 12:04d}-{index % 12 + 1:02d}"
+    await bot.send_message(
+        chat_id,
+        render_report(rows, month, await money_budgets(services)),
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
 
 
 async def read_money(services: Services) -> list[dict]:
@@ -323,67 +239,24 @@ async def money_budgets(services: Services) -> dict[str, float]:
         return {}
 
 
-async def _send_report_state(
-    bot: Bot,
-    chat_id: int,
-    services: Services,
-    rows: list[dict],
-    view: str,
-) -> None:
-    state = report_state(
-        rows,
-        view,
-        datetime.now(services.settings.tz),
-        await money_budgets(services),
-    )
-    markup = build_report_shell()
-    if markup:
-        ok, reason = await send_widget(
-            services.settings.telegram_bot_token,
-            chat_id,
-            markup,
-            REPORT_CAPTION,
-            allow_queries=True,
-            chat_data=dumps_report_state(state),
-        )
-        if ok:
-            logger.info("report_widget view=%s", view)
-            return
-        logger.warning("report_widget: %s", reason)
-
-    if state["k"] == "l":
-        await bot.send_message(
-            chat_id,
-            MONTHS_TEXT,
-            parse_mode="HTML",
-            reply_markup=months_menu(rows),
-        )
-    else:
-        await bot.send_message(
-            chat_id,
-            render_report(rows, state["v"]),
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-        )
-
-
-async def _send_month_report(
-    message: Message, services: Services, month: str
-) -> None:
-    await _send_report(message, services, f"mon:{month}")
-
-
-async def _send_month_widget(
+async def _send_month_text(
     bot: Bot,
     chat_id: int,
     services: Services,
     rows: list[dict],
     month: str,
 ) -> None:
-    await _send_report_state(bot, chat_id, services, rows, f"mon:{month}")
+    await bot.send_message(
+        chat_id,
+        render_report(rows, month, await money_budgets(services)),
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
 
 
-def render_report(rows: list[dict], month: str) -> str:
+def render_report(
+    rows: list[dict], month: str, budgets: dict[str, float] | None = None
+) -> str:
     summary = summarize(rows, month)
     label = month_label(month)
 
@@ -399,7 +272,7 @@ def render_report(rows: list[dict], month: str) -> str:
         f"Операций: {summary.count}",
     ]
 
-    lines.extend(_category_lines(summary))
+    lines.extend(_category_lines(summary, budgets))
 
     if summary.income_categories:
         lines.extend(["", "<b>Доходы</b>"])
@@ -431,12 +304,29 @@ def render_report(rows: list[dict], month: str) -> str:
     return "\n".join(lines)
 
 
-def _category_lines(summary: MonthSummary) -> list[str]:
+def _category_lines(
+    summary: MonthSummary, budgets: dict[str, float] | None = None
+) -> list[str]:
     if not summary.expense_categories:
         return []
+    budgets = budgets or {}
     lines = ["", "<b>Расходы по категориям</b>"]
     total = summary.expense or 1.0
     for category, amount in summary.expense_categories[:10]:
+        limit = budgets.get(category.casefold(), 0.0)
+        if limit:
+            left = limit - amount
+            tail = (
+                f"перерасход {format_rub(-left)} ₽"
+                if left < 0
+                else f"осталось {format_rub(left)} ₽"
+            )
+            lines.append(
+                f"• {html.escape(category)} — {format_rub(amount)} / "
+                f"{format_rub(limit)} ₽ · {tail} "
+                f"({amount / limit * 100:.0f}%)"
+            )
+            continue
         share = amount / total * 100
         lines.append(
             f"• {html.escape(category)} — {format_rub(amount)} ₽ ({share:.0f}%)"

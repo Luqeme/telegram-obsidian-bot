@@ -213,7 +213,7 @@ def _menu_callback(data: str, message=None, user_id: int = 2):
     )
 
 
-def test_menu_report_opens_widget_directly() -> None:
+def test_menu_report_opens_report() -> None:
     calls: list[tuple] = []
     original = menu_handlers.send_report
 
@@ -285,7 +285,7 @@ def test_menu_today_works_for_inaccessible_message() -> None:
     assert calls == [("bot-stub", 2)]
 
 
-def test_menu_report_reaches_report_state() -> None:
+def test_menu_report_sends_text_report() -> None:
     from datetime import datetime, timezone
 
     from handlers import report as report_handlers
@@ -295,9 +295,13 @@ def test_menu_report_reaches_report_state() -> None:
     async def fake_read(_services) -> list[dict]:
         return []
 
-    async def fake_send(bot, chat_id, services, rows, view) -> None:
-        calls.append((chat_id, view, rows))
+    async def fake_budgets(_services) -> dict:
+        return {}
 
+    async def fake_send(chat_id, text, **kwargs):
+        calls.append((chat_id, text))
+
+    bot = SimpleNamespace(send_message=fake_send)
     message = Message.model_validate(
         {
             "message_id": 1,
@@ -306,6 +310,7 @@ def test_menu_report_reaches_report_state() -> None:
         }
     )
     callback = _menu_callback("menu:report", message)
+    callback.bot = bot
     services = SimpleNamespace(
         settings=SimpleNamespace(
             tz=timezone.utc,
@@ -314,14 +319,14 @@ def test_menu_report_reaches_report_state() -> None:
         github=SimpleNamespace(),
     )
 
-    originals = (report_handlers.read_money, report_handlers._send_report_state)
+    originals = (report_handlers.read_money, report_handlers.money_budgets)
     report_handlers.read_money = fake_read
-    report_handlers._send_report_state = fake_send
+    report_handlers.money_budgets = fake_budgets
     try:
         asyncio.run(menu_handlers.on_menu(callback, services))
     finally:
-        report_handlers.read_money, report_handlers._send_report_state = originals
+        report_handlers.read_money, report_handlers.money_budgets = originals
 
     assert calls and calls[0][0] == 2
-    assert calls[0][1] == "current"
+    assert "Отчёт" in calls[0][1]
     assert isinstance(datetime.now(timezone.utc), datetime)

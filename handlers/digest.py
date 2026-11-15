@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import html
-import json
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -21,7 +20,6 @@ from aiogram.types import (
 from services import GitHubError, Services
 from services.money import MONEY_PATH, format_rub, parse_rows, to_amount
 from services.notes_index import TaskRef
-from services.widgets import build_today_widget, send_widget
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +27,6 @@ router = Router(name="digest")
 
 MAX_BUTTONS = 6
 BUTTON_LABEL = 40
-STATE_TASKS = 5
-STATE_TEXT = 42
-CHAT_DATA_LIMIT = 1024
 
 
 @router.message(Command("today"))
@@ -45,7 +40,7 @@ async def cmd_today(message: Message, services: Services) -> None:
 
 
 async def send_today(bot: Bot, chat_id: int, services: Services, *, notify=None) -> None:
-    """Отправляет виджет «Сегодня» в чат. notify — куда писать текст ошибки."""
+    """Отправляет сводку дня текстом с кнопками закрытия задач."""
     try:
         data = await collect_today(services)
     except GitHubError as exc:
@@ -53,20 +48,6 @@ async def send_today(bot: Bot, chat_id: int, services: Services, *, notify=None)
         if notify is not None:
             await notify(exc.user_message)
         return
-
-    markup = build_today_widget()
-    if markup:
-        ok, reason = await send_widget(
-            services.settings.telegram_bot_token,
-            chat_id,
-            markup,
-            f"📅 Сегодня, {data['now']:%d.%m}",
-            allow_queries=True,
-            chat_data=dumps_state(build_today_state(data)),
-        )
-        if ok:
-            return
-        logger.warning("today_widget: %s", reason)
 
     await bot.send_message(
         chat_id,
@@ -130,57 +111,6 @@ async def collect_today(services: Services) -> dict:
         "income": income,
         "truncated": services.index.truncated,
     }
-
-
-def build_today_state(data: dict, offset: int = 0) -> dict:
-    ordered = data["ordered"]
-    offset = max(0, offset)
-    if offset >= len(ordered):
-        offset = 0
-    overdue_ids = {task.id for task in data["overdue"]}
-    due_ids = {task.id for task in data["due_today"]}
-    tasks = []
-    for task in ordered[offset : offset + STATE_TASKS]:
-        due = task.due or ""
-        text = task.text
-        if len(text) > STATE_TEXT:
-            text = text[: STATE_TEXT - 1].rstrip() + "…"
-        tasks.append(
-            {
-                "i": task.id,
-                "x": text,
-                "d": f"{due[8:10]}.{due[5:7]}" if due else "",
-                "k": "⏳" if task.id in overdue_ids else "📅" if task.id in due_ids else "•",
-            }
-        )
-
-    parts: list[str] = []
-    if data["expense"]:
-        parts.append(f"−{format_rub(data['expense'])} ₽")
-    if data["income"]:
-        parts.append(f"+{format_rub(data['income'])} ₽")
-
-    state = {
-        "n": len(data["today_notes"]),
-        "in": len(data["inbox"]),
-        "o": len(data["tasks"]),
-        "ov": len(data["overdue"]),
-        "du": len(data["due_today"]),
-        "m": " · ".join(parts),
-        "t": tasks,
-        "off": offset,
-        "tot": len(ordered),
-    }
-
-    # chat_data ограничен 1024 байтами: убираем задачи, пока не влезем.
-    while state["t"] and len(dumps_state(state).encode("utf-8")) > CHAT_DATA_LIMIT:
-        state["t"].pop()
-
-    return state
-
-
-def dumps_state(state: dict) -> str:
-    return json.dumps(state, ensure_ascii=False)
 
 
 def render_today_text(data: dict) -> str:
