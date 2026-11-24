@@ -13,7 +13,13 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
 
 from services import GitHubError, Services
-from services.money import MONEY_PATH, parse_rows, to_amount
+from services.money import (
+    MONEY_PATH,
+    category_spent,
+    format_rub,
+    parse_rows,
+    to_amount,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +44,7 @@ class WeeklyReview:
     prev_expense: float
     prev_income: float
     projects_idle: list[str] = field(default_factory=list)
+    budget_alerts: list[str] = field(default_factory=list)
 
     @property
     def has_data(self) -> bool:
@@ -151,6 +158,7 @@ async def collect_weekly(services: Services) -> WeeklyReview:
 
     expense, income = 0.0, 0.0
     prev_expense, prev_income = 0.0, 0.0
+    rows: list[dict] = []
     try:
         rows = parse_rows(await services.github.get_text(MONEY_PATH))
         expense, income = _money_range(rows, start, end)
@@ -159,6 +167,8 @@ async def collect_weekly(services: Services) -> WeeklyReview:
         )
     except GitHubError as exc:
         logger.warning("weekly money: %s", exc)
+
+    alerts = await _budget_alerts(services, rows, now.strftime("%Y-%m"))
 
     idle: list[str] = []
     for hub in projects:
@@ -180,7 +190,31 @@ async def collect_weekly(services: Services) -> WeeklyReview:
         prev_expense=prev_expense,
         prev_income=prev_income,
         projects_idle=idle,
+        budget_alerts=alerts,
     )
+
+
+async def _budget_alerts(
+    services: Services, rows: list[dict], month: str
+) -> list[str]:
+    """Категории, где месячный лимит израсходован на 80% и больше."""
+    try:
+        budgets = await services.index.money_budgets()
+        categories = await services.index.money_categories()
+    except Exception:  # noqa: BLE001 - обзор не должен падать из-за лимитов
+        return []
+
+    alerts: list[str] = []
+    for name in categories or []:
+        limit = budgets.get(name.casefold(), 0.0)
+        if not limit:
+            continue
+        spent = category_spent(rows, month, name)
+        if spent > limit:
+            alerts.append(f"{name}: перерасход {format_rub(spent - limit)} ₽")
+        elif spent / limit >= 0.8:
+            alerts.append(f"{name}: {spent / limit * 100:.0f}% лимита")
+    return alerts
 
 
 async def send_weekly(bot: Bot, services: Services) -> bool:
@@ -227,6 +261,15 @@ def render_weekly(review: WeeklyReview) -> str:
         delta = (review.expense - review.prev_expense) / review.prev_expense * 100
         sign = "−" if delta < 0 else "+"
         lines.append(f"<i>Расход к прошлой неделе: {sign}{abs(delta):.0f}%</i>")
+
+    if review.budget_alerts:
+        lines.extend(
+            [
+                "",
+                "<b>Бюджеты</b>",
+                "• " + ", ".join(html.escape(name) for name in review.budget_alerts),
+            ]
+        )
 
     if review.projects_idle:
         lines.extend(

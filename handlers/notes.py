@@ -43,8 +43,13 @@ from services.money import (
     category_spent,
     format_rub,
     match_category,
+    note_hash,
     parse_limit_phrase,
     parse_rows,
+    replace_row_category,
+    find_row_line,
+    budget_line,
+    to_amount,
 )
 from services.notes_index import set_money_limit
 
@@ -1095,11 +1100,179 @@ async def _save_money(
         Action(kind="lines", path=MONEY_PATH, lines=[row], label="транзакция"),
     )
 
-    await message.answer(
-        f"💰 <b>{kind} записан</b>\n\n"
+    categories = await money_categories(services)
+    rows = await _money_rows(services)
+    month = created.strftime("%Y-%m")
+    limit = (await _money_budgets(services)).get(category.casefold(), 0.0)
+    lines = [
+        f"💰 <b>{kind} записан</b>",
+        "",
         f"{sign}{amount} ₽ · {html.escape(category)}",
-        parse_mode="HTML",
+    ]
+    extra = budget_line(
+        category,
+        category_spent(rows, month, category),
+        limit,
     )
+    if extra:
+        lines.extend(["", html.escape(extra)])
+
+    await message.answer(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=_money_keyboard(amount, note, categories),
+    )
+
+
+CALLBACK_LIMIT = 64
+MONEY_BUTTONS = 8
+
+
+def _money_keyboard(
+    amount: str, note: str, categories: list[str]
+) -> InlineKeyboardMarkup:
+    """Кнопки категорий под подтверждением траты."""
+    digest = note_hash(note)
+    rows: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for name in categories[:MONEY_BUTTONS]:
+        data = f"mc:{amount}:{digest}:{name}"
+        if len(data.encode("utf-8")) > CALLBACK_LIMIT:
+            continue
+        row.append(InlineKeyboardButton(text=name, callback_data=data))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="❌ Отменить",
+                callback_data=f"mx:{amount}:{digest}",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _money_message(
+    message: Message,
+    services: Services,
+    values: list[str],
+    *,
+    prefix: str = "",
+) -> None:
+    """Перерисовывает подтверждение траты с новой категорией и бюджетом."""
+    amount = to_amount(values[2])
+    kind = "Расход" if values[1] == "expense" else "Доход"
+    sign = "−" if values[1] == "expense" else "+"
+    category = values[3]
+    note = values[4]
+    month = datetime.now(services.settings.tz).strftime("%Y-%m")
+    limit = (await _money_budgets(services)).get(category.casefold(), 0.0)
+    rows = await _money_rows(services)
+    lines = [
+        f"💰 <b>{kind} записан</b>",
+        "",
+        f"{sign}{format_rub(amount)} ₽ · {html.escape(category)}"
+        + (f" · {prefix}" if prefix else ""),
+    ]
+    extra = budget_line(category, category_spent(rows, month, category), limit)
+    if extra:
+        lines.extend(["", html.escape(extra)])
+
+    markup = _money_keyboard(_format_amount(amount), note, await money_categories(services))
+    try:
+        await message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=markup)
+    except TelegramAPIError:
+        pass
+
+
+@router.callback_query(F.data.startswith("mc:"))
+async def on_money_category(callback: CallbackQuery, services: Services) -> None:
+    amount, _, rest = callback.data[3:].partition(":")
+    digest, _, category = rest.partition(":")
+    message = callback.message
+    if not isinstance(message, Message) or not category:
+        await callback.answer()
+        return
+
+    try:
+        raw = await services.github.get_text(MONEY_PATH)
+        change = replace_row_category(raw, amount, digest, category)
+    except GitHubError as exc:
+        logger.error("money category: %s", exc)
+        await callback.answer("Не получилось, попробуй ещё раз")
+        return
+
+    if change is None:
+        await callback.answer("Запись уже изменилась")
+        return
+
+    old_line, new_line, values = change
+    if old_line != new_line:
+        try:
+            updated = await services.github.replace_line(
+                MONEY_PATH, old_line, new_line, f"Money category: {category}"
+            )
+        except GitHubError as exc:
+            logger.error("money category: %s", exc)
+            await callback.answer("Не получилось, попробуй ещё раз")
+            return
+        if not updated:
+            await callback.answer("Запись уже изменилась")
+            return
+
+    logger.info("money_category category=%s", category)
+    await callback.answer(f"Категория: {category}")
+    await _money_message(message, services, values)
+
+
+@router.callback_query(F.data.startswith("mx:"))
+async def on_money_cancel(callback: CallbackQuery, services: Services) -> None:
+    amount, _, digest = callback.data[3:].partition(":")
+    message = callback.message
+    if not isinstance(message, Message) or not digest:
+        await callback.answer()
+        return
+
+    try:
+        raw = await services.github.get_text(MONEY_PATH)
+        found = find_row_line(raw, amount, digest)
+    except GitHubError as exc:
+        logger.error("money cancel: %s", exc)
+        await callback.answer("Не получилось, попробуй ещё раз")
+        return
+
+    if found is None:
+        await callback.answer("Запись уже изменилась")
+        return
+
+    line, _ = found
+    try:
+        removed = await services.github.remove_lines(
+            MONEY_PATH, [line], "Money: cancel"
+        )
+    except GitHubError as exc:
+        logger.error("money cancel: %s", exc)
+        await callback.answer("Не получилось, попробуй ещё раз")
+        return
+
+    if not removed:
+        await callback.answer("Запись уже изменилась")
+        return
+
+    logger.info("money_cancel amount=%s", amount)
+    await callback.answer("Отменено")
+    try:
+        await message.edit_text(
+            "❌ <b>Запись отменена</b>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[]),
+        )
+    except TelegramAPIError:
+        pass
 
 
 async def money_categories(services: Services) -> list[str]:

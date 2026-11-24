@@ -61,6 +61,24 @@ class FallbackGitHub:
         return self.files[path]
 
 
+def test_blank_files_are_skipped() -> None:
+    github = SnapshotGitHub(
+        {
+            "00_Inbox/a.md": NOTE,
+            "00_Inbox/empty.md": "",
+            "00_Inbox/spaces.md": "   \n\n  ",
+        }
+    )
+
+    async def go():
+        index = NotesIndex(github)
+        return await index.notes()
+
+    notes = run(go())
+
+    assert [note.title for note in notes] == ["Заметка"]
+
+
 def test_snapshot_is_used_for_index() -> None:
     github = SnapshotGitHub(
         {

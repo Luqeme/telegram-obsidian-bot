@@ -92,3 +92,59 @@ def test_weekly_survives_broken_index() -> None:
     )
 
     assert asyncio.run(build_weekly(services)) == ""
+
+
+def test_budget_alerts_warn_and_over() -> None:
+    from handlers.health import _budget_alerts
+
+    class Index:
+        async def money_budgets(self) -> dict[str, float]:
+            return {"еда": 8000.0, "автомобиль": 7000.0}
+
+        async def money_categories(self) -> list[str]:
+            return ["Еда", "Автомобиль"]
+
+    rows = [
+        {
+            "date": "2026-11-01",
+            "kind": "expense",
+            "amount": "6800",
+            "category": "Еда",
+        },
+        {
+            "date": "2026-11-02",
+            "kind": "expense",
+            "amount": "8400",
+            "category": "Автомобиль",
+        },
+    ]
+    services = SimpleNamespace(index=Index())
+
+    alerts = asyncio.run(_budget_alerts(services, rows, "2026-11"))
+
+    assert "Еда: 85% лимита" in alerts
+    assert "Автомобиль: перерасход 1 400 ₽" in alerts
+
+
+def test_weekly_render_shows_budgets() -> None:
+    from handlers.health import WeeklyReview, render_weekly
+
+    review = WeeklyReview(
+        period="10.11–16.11",
+        notes_week=1,
+        tasks_done=1,
+        tasks_open=1,
+        overdue=0,
+        inbox=1,
+        inbox_stale=0,
+        expense=100,
+        income=0,
+        prev_expense=0,
+        prev_income=0,
+        budget_alerts=["Еда: 85% лимита"],
+    )
+
+    text = render_weekly(review)
+
+    assert "Бюджеты" in text
+    assert "85%" in text

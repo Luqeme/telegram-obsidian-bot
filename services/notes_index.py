@@ -27,7 +27,7 @@ DONE_RE = re.compile(r"✅\s*\d{4}-\d{2}-\d{2}")
 MONEY_LIMIT_RE = re.compile(r"^(.*?)\s*(?:—|–|:)\s*(\d[\d\s\u00a0]*(?:[.,]\d+)?)\s*₽?\s*$")
 PRIORITY_MARKS = ("⏫", "🔼", "🔽")
 
-DEFAULT_TTL = 600
+DEFAULT_TTL = 120
 MAX_FILES = 2000
 FETCH_CONCURRENCY = 6
 SKIP_NAMES = {"Карта.md", "README.md"}
@@ -292,7 +292,7 @@ class NotesIndex:
             money_budgets: dict[str, float] = {}
             money_path = ""
             for path, raw in documents.items():
-                note = parse_note(path, raw) if raw else None
+                note = parse_note(path, raw) if raw and raw.strip() else None
                 if note is None:
                     continue
                 if note.note_type == "project":

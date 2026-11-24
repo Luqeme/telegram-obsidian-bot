@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import re
 from dataclasses import dataclass, field
@@ -299,3 +300,75 @@ def budget_status(spent: float, limit: float) -> dict:
         "left": round(left),
         "over": spent > limit,
     }
+
+
+def budget_line(category: str, spent: float, limit: float) -> str | None:
+    """Строка «потрачено / лимит» для ответа после траты."""
+    if not limit:
+        return None
+    left = limit - spent
+    pct = round(spent / limit * 100)
+    if left < 0:
+        return (
+            f"⚠️ {category}: перерасход {format_rub(-left)} ₽ "
+            f"({format_rub(spent)} из {format_rub(limit)}, {pct}%)"
+        )
+    prefix = "⚠️ " if pct >= 80 else ""
+    return (
+        f"{prefix}{category}: {format_rub(spent)} из {format_rub(limit)} ₽ · "
+        f"осталось {format_rub(left)} ₽ ({pct}%)"
+    )
+
+
+def note_hash(note: str) -> str:
+    """Короткий отпечаток заметки: по нему кнопки находят строку в CSV."""
+    return hashlib.sha1(note.encode("utf-8")).hexdigest()[:6]
+
+
+def csv_row(values: list[str]) -> str:
+    buffer = io.StringIO()
+    csv.writer(buffer).writerow(values)
+    return buffer.getvalue().rstrip("\r\n")
+
+
+def locate_row(raw: str, amount: object, digest: str) -> tuple[int, list[str]] | None:
+    """Последняя строка CSV с такой суммой и отпечатком заметки."""
+    target = to_amount(amount)
+    lines = raw.splitlines()
+    for index in range(len(lines) - 1, 0, -1):
+        line = lines[index]
+        if not line.strip():
+            continue
+        try:
+            values = next(csv.reader([line]))
+        except (csv.Error, StopIteration):
+            continue
+        if len(values) != 5:
+            continue
+        if to_amount(values[2]) != target:
+            continue
+        if note_hash(values[4]) != digest:
+            continue
+        return index, values
+    return None
+
+
+def replace_row_category(
+    raw: str, amount: object, digest: str, category: str
+) -> tuple[str, str, list[str]] | None:
+    """(старая строка, новая строка, поля) или None, если строку не нашли."""
+    found = locate_row(raw, amount, digest)
+    if found is None:
+        return None
+    index, values = found
+    old_line = raw.splitlines()[index]
+    values[3] = category
+    return old_line, csv_row(values), values
+
+
+def find_row_line(raw: str, amount: object, digest: str) -> tuple[str, list[str]] | None:
+    found = locate_row(raw, amount, digest)
+    if found is None:
+        return None
+    index, values = found
+    return raw.splitlines()[index], values
