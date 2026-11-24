@@ -24,8 +24,11 @@ HOME_DIR = "30_Дом"
 
 
 @router.message(Command("menu"))
-async def cmd_menu(message: Message) -> None:
-    await message.answer("Главное меню:", reply_markup=main_menu())
+async def cmd_menu(message: Message, services: Services) -> None:
+    await message.answer(
+        "Главное меню:",
+        reply_markup=main_menu(services.settings.dashboard_url),
+    )
 
 
 @router.callback_query(F.data.startswith("menu:"))

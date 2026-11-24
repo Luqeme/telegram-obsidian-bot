@@ -39,13 +39,13 @@ class IsPendingReply(Filter):
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message) -> None:
+async def cmd_start(message: Message, services: Services) -> None:
     await message.answer(
         "👋 Привет!\n\n"
         "Кидай сюда мысль текстом или голосовым — я разберу её на тезисы, "
         "теги и задачи и сохраню заметку в Obsidian.\n\n"
         "Или выбери действие:",
-        reply_markup=main_menu(),
+        reply_markup=main_menu(services.settings.dashboard_url),
     )
 
 

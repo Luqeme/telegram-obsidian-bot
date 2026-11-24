@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from handlers.menu_ui import main_menu
+from handlers.menu_ui import MENU_ROWS, main_menu
 from handlers.menu import _show_home, _show_projects
 from handlers.report import months_menu, report_menu
 
@@ -51,6 +51,17 @@ def test_menu_has_all_actions() -> None:
         "menu:help",
     ]
     assert all(1 <= len(row) <= 2 for row in keyboard.inline_keyboard)
+
+
+def test_menu_has_dashboard_button_only_when_configured() -> None:
+    assert len(main_menu().inline_keyboard) == len(MENU_ROWS)
+
+    keyboard = main_menu("https://dash.cloudfern.ru/")
+    assert len(keyboard.inline_keyboard) == len(MENU_ROWS) + 1
+    button = keyboard.inline_keyboard[-1][0]
+    assert button.web_app is not None
+    assert button.web_app.url == "https://dash.cloudfern.ru/"
+    assert button.callback_data is None
 
 
 def test_report_menu_has_periods() -> None:

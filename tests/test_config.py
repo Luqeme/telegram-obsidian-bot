@@ -59,6 +59,19 @@ def test_inbox_dir_defaults_when_blank() -> None:
     assert make_settings(obsidian_inbox_dir="  ").obsidian_inbox_dir == "00_Inbox"
 
 
+def test_dashboard_url_requires_https() -> None:
+    assert make_settings(dashboard_url="").dashboard_url == ""
+    assert (
+        make_settings(dashboard_url=" https://dash.example.ru ")
+        .dashboard_url
+        == "https://dash.example.ru/"
+    )
+    with pytest.raises(ValidationError):
+        make_settings(dashboard_url="http://dash.example.ru")
+    with pytest.raises(ValidationError):
+        make_settings(dashboard_url="dash.example.ru")
+
+
 def test_digest_time_is_normalized() -> None:
     assert make_settings(digest_time="9:05").digest_time == "09:05"
     assert make_settings(digest_time="").digest_time == ""

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
 MENU_ROWS: tuple[tuple[tuple[str, str], ...], ...] = (
     (("🔎 Найти", "menu:find"), ("💬 Спросить", "menu:ask")),
@@ -13,13 +13,19 @@ MENU_ROWS: tuple[tuple[tuple[str, str], ...], ...] = (
 )
 
 
-def main_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+def main_menu(dashboard_url: str = "") -> InlineKeyboardMarkup:
+    """Кнопка дашборда добавляется, только если адрес задан в .env."""
+    rows = [
+        [InlineKeyboardButton(text=text, callback_data=data) for text, data in row]
+        for row in MENU_ROWS
+    ]
+    if dashboard_url:
+        rows.append(
             [
-                InlineKeyboardButton(text=text, callback_data=data)
-                for text, data in row
+                InlineKeyboardButton(
+                    text="📊 Дашборд",
+                    web_app=WebAppInfo(url=dashboard_url),
+                )
             ]
-            for row in MENU_ROWS
-        ]
-    )
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)

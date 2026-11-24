@@ -97,7 +97,7 @@ async def on_report(callback: CallbackQuery, services: Services) -> None:
         await show_report_menu(message)
         return
     if action == "main":
-        await _edit(message, MAIN_TEXT, main_menu())
+        await _edit(message, MAIN_TEXT, main_menu(services.settings.dashboard_url))
         return
 
     await message.answer("Неизвестный пункт отчёта.")

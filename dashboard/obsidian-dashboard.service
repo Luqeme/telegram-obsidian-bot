@@ -1,0 +1,22 @@
+[Unit]
+Description=Obsidian Mini App dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=obsidian-dash
+Group=obsidian-dash
+WorkingDirectory=/opt/obsidian-dashboard
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/obsidian-dashboard/.venv/bin/uvicorn dashboard.app:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips=127.0.0.1
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/obsidian-dashboard
+
+[Install]
+WantedBy=multi-user.target

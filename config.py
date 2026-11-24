@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     digest_time: str = "09:00"
     weekly_ping_time: str = "10:00"
     monthly_report_time: str = "10:00"
+    dashboard_url: str = ""
 
     @field_validator("digest_time", "weekly_ping_time", "monthly_report_time")
     @classmethod
@@ -102,6 +103,18 @@ class Settings(BaseSettings):
     def _clean_inbox_dir(cls, value: str) -> str:
         value = value.strip().strip("/").strip()
         return value or "00_Inbox"
+
+    @field_validator("dashboard_url")
+    @classmethod
+    def _check_dashboard_url(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            return ""
+        if not value.startswith("https://"):
+            raise ValueError(
+                "нужен адрес на https:// — Telegram не откроет Mini App по http"
+            )
+        return value.rstrip("/") + "/"
 
     @field_validator("timezone")
     @classmethod
