@@ -245,7 +245,7 @@ h1 { margin: 0; font-size: 30px; line-height: 1.15; font-weight: 700; letter-spa
     state = "loading";
     render();
     try {
-      const resp = await fetch("/api/today", {
+      const resp = await fetch("api/today", {
         headers: { "X-Init-Data": initData },
         cache: "no-store",
       });
